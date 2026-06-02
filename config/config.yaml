@@ -1,0 +1,251 @@
+
+# Driver Monitoring System (DMS) - Master Configuration
+
+# Override any value via environment variable: DMS__SECTION__KEY
+
+# Project Paths
+paths:
+  project_root: "d:/Antigravity/Attention"
+  data_root: "d:/Antigravity/Attention/data"
+  raw_data: "d:/Antigravity/Attention/data/raw"
+  processed_data: "d:/Antigravity/Attention/data/processed"
+  features_dir: "d:/Antigravity/Attention/data/features"
+  checkpoints_dir: "d:/Antigravity/Attention/checkpoints"
+  logs_dir: "d:/Antigravity/Attention/logs"
+  tensorboard_dir: "d:/Antigravity/Attention/runs"
+  exports_dir: "d:/Antigravity/Attention/exports"
+
+  # Dataset paths
+  dmd_distraction: "d:/Antigravity/Attention/data/raw/DMD-Distraction"
+  dmd_drowsiness: "d:/Antigravity/Attention/data/raw/DMD-Drowsiness"
+  uta_rldd: "d:/Antigravity/Attention/data/raw/UTA-RLDD"
+  auc_v2: "d:/Antigravity/Attention/data/raw/AUC-V2"
+
+  # MediaPipe model asset
+  mediapipe_model: "d:/Antigravity/Attention/models/face_landmarker_v2_with_blendshapes.task"
+
+# MediaPipe Face Landmarker v2 Configuration
+mediapipe:
+  model_asset_path: "face_landmarker_v2_with_blendshapes.task"
+  num_faces: 1
+  min_face_detection_confidence: 0.5
+  min_face_presence_confidence: 0.5
+  min_tracking_confidence: 0.5
+  output_face_blendshapes: true
+  output_facial_transformation_matrixes: true
+  running_mode: "VIDEO"  # IMAGE | VIDEO | LIVE_STREAM
+
+# Preprocessing
+preprocessing:
+  target_size: [640, 480]            # (width, height) resize target
+  clahe:
+    enabled: true
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+    brightness_threshold: 100        # Apply CLAHE only when mean L < this
+  gamma_correction:
+    enabled: true
+    gamma: 1.2                       # > 1.0 darkens, < 1.0 brightens
+    adaptive: true                   # Use adaptive gamma based on mean brightness
+
+# Feature Extraction
+features:
+  fps: 29.76                         # Native framerate of DMD dataset
+  num_features: 18                   # Total feature vector dimension
+
+  # Landmark indexes (MediaPipe 478-point model)
+  landmarks:
+    left_eye: [362, 385, 387, 263, 373, 380]    # p1-p6 for EAR
+    right_eye: [33, 160, 158, 133, 153, 144]    # p1-p6 for EAR
+    upper_lip: [13]
+    lower_lip: [14]
+    left_mouth: [61]
+    right_mouth: [291]
+
+    # More precise MAR landmarks
+    outer_upper_lip: [82, 13, 312]
+    outer_lower_lip: [87, 14, 317]
+    left_mouth_corner: [78]
+    right_mouth_corner: [308]
+
+    # Iris landmarks
+    left_iris_center: [468]
+    right_iris_center: [473]
+
+    # Head pose reference points
+    nose_tip: [1]
+    chin: [152]
+    left_eye_outer: [33]
+    right_eye_outer: [263]
+    left_eye_inner: [133]
+    right_eye_inner: [362]
+
+  # EAR (Eye Aspect Ratio) thresholds
+  ear:
+    blink_threshold: 0.21            # EAR below this = eye closed
+    calibration_frames: 894          # ~30s at 29.76fps for baseline
+    calibration_percentile: 50       # Median EAR during calibration
+
+  # MAR (Mouth Aspect Ratio) thresholds
+  mar:
+    yawn_threshold: 0.6              # MAR above this = mouth wide open
+
+  # PERCLOS settings
+  perclos:
+    window_seconds: 60               # Rolling window for PERCLOS calc
+    threshold: 0.8                   # P80: proportion of time eyes >80% closed
+
+  # Blink detection
+  blink:
+    min_duration_frames: 2           # Min consecutive frames for valid blink
+    max_duration_frames: 15          # Max frames; longer = microsleep
+    rate_window_seconds: 60          # Window for blink rate (per minute)
+
+  # Gaze estimation
+  gaze:
+    stability_window_seconds: 1.0    # Window for gaze stability (std dev)
+    off_road_threshold_deg: 60.0     # Gaze angle > this = off-road
+    off_road_window_seconds: 5.0     # Window for eyes-off-road percentage
+
+  # Head pose
+  head_pose:
+    stability_window_seconds: 1.0    # Window for head pose stability (std dev)
+    nod_threshold_deg: 15.0          # Pitch dip > this = potential nod
+    nod_window_seconds: 10.0         # Window for head nod counting
+
+  # Temporal smoothing
+  smoothing:
+    ear_velocity_window: 3           # Frames for velocity calculation
+
+# Dataset / Sliding Window
+dataset:
+  seq_len: 90                        # Frames per sliding window
+  stride: 15                         # Stride between windows
+  label_strategy: "majority"         # majority | last | weighted
+
+  # Class definitions
+  classes:
+    - "Alert"
+    - "Drowsy"
+    - "Distracted"
+  num_classes: 3
+
+  # Label mappings from raw dataset annotations
+  dmd_distraction_mapping:
+    "safe driving": "Alert"
+    "texting right": "Distracted"
+    "texting left": "Distracted"
+    "phone right": "Distracted"
+    "phone left": "Distracted"
+    "radio": "Distracted"
+    "drinking": "Distracted"
+    "reaching behind": "Distracted"
+    "hair and makeup": "Distracted"
+    "talking to passenger": "Distracted"
+
+  dmd_drowsiness_mapping:
+    "eyes opened": "Alert"
+    "blinking": "Alert"
+    "eyes opening": "Alert"
+    "eyes closed": "Drowsy"
+    "eyes closing": "Drowsy"
+    "yawning": "Drowsy"
+    "yawning with hand": "Drowsy"
+
+  uta_rldd_mapping:
+    "alert": "Alert"
+    "low_vigilance": "Drowsy"
+    "drowsy": "Drowsy"
+
+  # Data splits
+  splits:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+  split_strategy: "subject"          # subject | random | temporal
+
+# Model Architecture
+model:
+  name: "DriverStateNet"
+  input_dim: 18                      # Must match features.num_features
+  hidden_dim: 64                     # LSTM hidden size
+  num_layers: 2                      # Bi-LSTM layers
+  num_classes: 3
+  dropout_lstm: 0.3                  # Dropout between LSTM layers
+  dropout_classifier: 0.4            # Dropout in classifier head
+  bidirectional: true
+  use_layer_norm: true
+  attention_type: "additive"         # additive (Bahdanau) | dot | none
+
+  # Classifier head dimensions
+  classifier:
+    fc1_out: 128
+    fc2_out: 64
+
+# Training Configuration
+training:
+  epochs: 100
+  batch_size: 64
+  num_workers: 4
+  pin_memory: true
+  gradient_clip_max_norm: 1.0
+
+  # Optimizer
+  optimizer:
+    type: "AdamW"
+    lr: 0.001
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+  # Learning rate scheduler
+  scheduler:
+    type: "CosineAnnealingWarmRestarts"
+    T_0: 10
+    T_mult: 2
+    eta_min: 1.0e-6
+
+  # Loss function
+  loss:
+    type: "CrossEntropyLoss"
+    use_class_weights: true          # Computed from training set
+    label_smoothing: 0.1
+
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 15
+    min_delta: 0.001
+    monitor: "val_f1_macro"          # Metric to monitor
+    mode: "max"                      # max | min
+
+  # Mixed precision
+  mixed_precision: true
+  compile_model: false               # torch.compile() — set true for PyTorch 2.x
+
+  # Reproducibility
+  seed: 42
+  deterministic: true
+
+# Evaluation
+evaluation:
+  metrics:
+    - "accuracy"
+    - "precision_macro"
+    - "recall_macro"
+    - "f1_macro"
+    - "f1_per_class"
+    - "confusion_matrix"
+    - "roc_auc"
+  threshold_sweep: false             # Sweep classification thresholds
+  save_predictions: true             # Save raw predictions to disk
+  export_onnx: true                  # Export best model to ONNX
+
+# Logging
+logging:
+  level: "INFO"                      # DEBUG | INFO | WARNING | ERROR
+  console: true
+  file: true
+  log_file: "d:/Antigravity/Attention/logs/training.log"
+  tensorboard: true
+  log_every_n_steps: 50

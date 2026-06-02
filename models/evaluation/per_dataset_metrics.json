@@ -1,0 +1,34 @@
+{
+  "AUC-V2": {
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "n_samples": 274,
+    "f1_alert": 0.0,
+    "f1_drowsy": 0.0,
+    "f1_distracted": 1.0
+  },
+  "DMD-Distraction": {
+    "accuracy": 0.8784798939460893,
+    "macro_f1": 0.44013394013394014,
+    "n_samples": 4526,
+    "f1_alert": 0.9357864357864358,
+    "f1_drowsy": 0.0,
+    "f1_distracted": 0.38461538461538464
+  },
+  "DMD-Drowsiness": {
+    "accuracy": 0.7504424778761062,
+    "macro_f1": 0.43362073493767966,
+    "n_samples": 1130,
+    "f1_alert": 0.8381171067738232,
+    "f1_drowsy": 0.4627450980392157,
+    "f1_distracted": 0.0
+  },
+  "UTA-RLDD": {
+    "accuracy": 0.590876644345491,
+    "macro_f1": 0.3699954791767419,
+    "n_samples": 29419,
+    "f1_alert": 0.4285171102661597,
+    "f1_drowsy": 0.6814693272640661,
+    "f1_distracted": 0.0
+  }
+}

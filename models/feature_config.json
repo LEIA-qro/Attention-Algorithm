@@ -1,0 +1,135 @@
+{
+  "model": {
+    "architecture": "DriverStateNet",
+    "input_size": 18,
+    "hidden_size": 64,
+    "num_layers": 2,
+    "num_classes": 3,
+    "seq_len": 90
+  },
+  "features": {
+    "names": [
+      "ear_left",
+      "ear_right",
+      "ear_avg",
+      "mar",
+      "perclos",
+      "blink_rate",
+      "blink_duration_avg",
+      "yaw",
+      "pitch",
+      "roll",
+      "gaze_yaw",
+      "gaze_pitch",
+      "gaze_stability",
+      "head_pose_stability",
+      "ear_velocity",
+      "head_nod_count",
+      "mouth_open_duration",
+      "eyes_off_road_pct"
+    ],
+    "count": 18,
+    "description": {
+      "ear_left": "Eye Aspect Ratio \u2014 left eye",
+      "ear_right": "Eye Aspect Ratio \u2014 right eye",
+      "ear_avg": "Average EAR (left + right) / 2",
+      "mar": "Mouth Aspect Ratio (yawn detection)",
+      "perclos": "Percentage of eye closure over 60s (P80)",
+      "blink_rate": "Blinks per minute (rolling 60s)",
+      "blink_duration_avg": "Average blink duration in ms (rolling 60s)",
+      "yaw": "Head yaw angle (degrees)",
+      "pitch": "Head pitch angle (degrees)",
+      "roll": "Head roll angle (degrees)",
+      "gaze_yaw": "Horizontal gaze direction (degrees)",
+      "gaze_pitch": "Vertical gaze direction (degrees)",
+      "gaze_stability": "Std-dev of gaze angle over 1s window",
+      "head_pose_stability": "Std-dev of head pose over 1s window",
+      "ear_velocity": "Rate of change of EAR (d(ear_avg)/dt)",
+      "head_nod_count": "Number of pitch dips >15\u00b0 in rolling 10s",
+      "mouth_open_duration": "Consecutive frames with MAR > threshold",
+      "eyes_off_road_pct": "% time gaze >30\u00b0 from center in 5s window"
+    }
+  },
+  "labels": {
+    "map": {
+      "Alert": 0,
+      "Drowsy": 1,
+      "Distracted": 2
+    },
+    "names": [
+      "Alert",
+      "Drowsy",
+      "Distracted"
+    ]
+  },
+  "thresholds": {
+    "ear_closed": 0.2,
+    "mar_yawn": 0.6,
+    "perclos_drowsy": 0.4,
+    "gaze_off_road_deg": 30.0,
+    "head_nod_pitch_deg": 15.0,
+    "gaze_stability_impairment": 8.0,
+    "blink_duration_impairment_ms": 400.0,
+    "head_nod_impairment_count": 3
+  },
+  "inference": {
+    "fps": 29.76,
+    "classification_interval_frames": 5,
+    "rolling_buffer_frames": 90,
+    "alert_duration_s": 2.0
+  },
+  "training": {
+    "epoch": 16,
+    "best_val_f1": 0.6523005248402308,
+    "val_metrics": {
+      "loss": 1.9718031907133404,
+      "accuracy": 0.6339333452147567,
+      "macro_f1": 0.6523005248402308,
+      "f1_alert": 0.5406792162396178,
+      "f1_drowsy": 0.6948350750440804,
+      "f1_distracted": 0.7213872832369942
+    }
+  },
+  "normalisation": {
+    "mean": [
+      0.8870690601711202,
+      0.8771195471450853,
+      0.8820943036581026,
+      0.03819724052397655,
+      0.5371125434618208,
+      6.454744129017284,
+      0.08566383883472874,
+      1.2470178931811298,
+      -1.1499820022292668,
+      -5.9395826398384965,
+      -88.44917126660656,
+      -0.15480872998838036,
+      0.015242348167494259,
+      0.7062095023369146,
+      4.3171886363848783e-05,
+      0.22952400678855836,
+      0.15396036077929245,
+      0.9828205665950175
+    ],
+    "std": [
+      0.3168122539600906,
+      0.31423640481593185,
+      0.31355229281589736,
+      0.09791761255185104,
+      0.46767269048946614,
+      10.135726848122262,
+      0.1281978233443002,
+      5.938897112847812,
+      9.224291224796163,
+      10.756363537526004,
+      11.71754019868141,
+      1.6155026727650035,
+      0.2965481623964808,
+      1.72904190669746,
+      0.028651017642802933,
+      0.8059952420192952,
+      3.636170613554301,
+      0.12990712643454716
+    ]
+  }
+}
