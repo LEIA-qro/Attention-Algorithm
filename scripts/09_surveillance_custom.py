@@ -445,7 +445,7 @@ class SurveillancePipeline:
                         self._current_probs = probs
 
         # Stage 3: object detection in driver ROI
-        if driver_box is not None and self._frame_count % 5 == 0:
+        if self._frame_count % 5 == 0:
             if self._backend == "hailo":
                 self._current_object_scores, self._current_detected_objects = (
                     detect_objects_in_roi_hailo(self._yolo, raw_frame, driver_box, self._yolo_cfg)

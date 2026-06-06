@@ -269,7 +269,10 @@ def detect_objects_in_roi(
 
     h, w = frame.shape[:2]
     # We still calculate padded to potentially filter later, but we run YOLO on full frame
-    padded = pad_box(driver_box, padding, w, h)
+    if driver_box is None:
+        padded = [0, 0, w, h]
+    else:
+        padded = pad_box(driver_box, padding, w, h)
     
     # Bypass ROI cropping to ensure objects like phones held wide are never clipped out
     roi = frame
@@ -281,6 +284,11 @@ def detect_objects_in_roi(
     for result in results:
         if result.boxes is None:
             continue
+            
+        with open("yolo_debug.txt", "w") as f:
+            f.write("Detected classes: " + str([int(b.cls[0]) for b in result.boxes]) + "\n")
+            f.write("Confidences: " + str([float(b.conf[0]) for b in result.boxes]) + "\n")
+            
         for box_data in result.boxes:
             cls_id = int(box_data.cls[0])
             conf = float(box_data.conf[0])
