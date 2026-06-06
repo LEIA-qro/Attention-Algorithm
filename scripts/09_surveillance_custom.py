@@ -620,6 +620,8 @@ class SurveillancePipeline:
             "driver_box": [int(v) for v in driver_box] if driver_box is not None else None,
             "face_box": [int(v) for v in face_box] if face_box is not None else None,
             "detected_objects": detected_objects,
+            "frame_width": int(raw_frame.shape[1]),
+            "frame_height": int(raw_frame.shape[0]),
         }
 
         return telemetry

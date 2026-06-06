@@ -638,8 +638,10 @@ body {
             offsetY = 0;
         }
 
-        const mapX = x => offsetX + (x / 640) * drawW;
-        const mapY = y => offsetY + (y / 360) * drawH;
+        const aiW = d.frame_width || 640;
+        const aiH = d.frame_height || 360;
+        const mapX = x => offsetX + (x / aiW) * drawW;
+        const mapY = y => offsetY + (y / aiH) * drawH;
 
         ctx.lineWidth = 2;
         ctx.font = "bold 14px Inter";

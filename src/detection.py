@@ -285,11 +285,6 @@ def detect_objects_in_roi(
     for result in results:
         if result.boxes is None:
             continue
-            
-        with open("yolo_debug.txt", "w") as f:
-            f.write("Detected classes: " + str([int(b.cls[0]) for b in result.boxes]) + "\n")
-            f.write("Confidences: " + str([float(b.conf[0]) for b in result.boxes]) + "\n")
-            
         for box_data in result.boxes:
             cls_id = int(box_data.cls[0])
             conf = float(box_data.conf[0])
@@ -308,8 +303,8 @@ def detect_objects_in_roi(
                 label = object_classes.get(cls_id, class_to_event.get(cls_id, str(cls_id)))
                 detected_objects.append({
                     "label": label,
-                    "conf": conf,
-                    "box": full_xyxy
+                    "conf": round(float(conf), 2),
+                    "box": [float(v) for v in full_xyxy]
                 })
 
     return event_scores, detected_objects
