@@ -519,8 +519,6 @@ class SurveillancePipeline:
                         self._reset()
                     elif key == ord("c"):
                         logger.info("Recalibrating baseline pose...")
-                        if hasattr(self._extractor, "_calibration") and self._extractor._calibration:
-                            self._extractor._calibration.reset()
                         if self._current_feats:
                             self._baseline_yaw = self._current_feats.get("pitch", 0.0)
                             self._baseline_pitch = self._current_feats.get("roll", 0.0)
