@@ -639,7 +639,7 @@ body {
         }
 
         const mapX = x => offsetX + (x / 640) * drawW;
-        const mapY = y => offsetY + (y / 480) * drawH;
+        const mapY = y => offsetY + (y / 360) * drawH;
 
         ctx.lineWidth = 2;
         ctx.font = "bold 14px Inter";
@@ -823,7 +823,7 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
 # Thread 2: AI inference on downscaled frames
 # ---------------------------------------------------------------------------
 _AI_WIDTH = 640
-_AI_HEIGHT = 480
+_AI_HEIGHT = 360
 
 
 def _inference_thread(pipeline):

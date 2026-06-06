@@ -280,7 +280,8 @@ def detect_objects_in_roi(
     if roi.size == 0:
         return event_scores, detected_objects
 
-    results = model(roi, device=device, verbose=False, imgsz=imgsz)
+    # Pass conf=conf_thresh to YOLO to override its internal default of 0.25
+    results = model(roi, device=device, verbose=False, imgsz=imgsz, conf=conf_thresh)
     for result in results:
         if result.boxes is None:
             continue
