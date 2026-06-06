@@ -442,16 +442,19 @@ class SurveillancePipeline:
                     head_distracted = False
                     if abs(phys_yaw) > 30.0:
                         head_distracted = True
-                    elif abs(phys_pitch) > 25.0 or abs(gaze_pitch) > 40.0 or (ear < 0.35 and abs(phys_yaw) < 15.0):
+                    elif abs(phys_pitch) > 25.0 or abs(gaze_pitch) > 40.0:
                         head_distracted = True
                         
+                    trigger_frames = int(1.5 * self._fps)
+                    cap_frames = int(2.0 * self._fps)
+                        
                     if head_distracted:
-                        self._distracted_frames = min(60, self._distracted_frames + 1)
+                        self._distracted_frames = min(cap_frames, self._distracted_frames + 1)
                     else:
                         self._distracted_frames = max(0, self._distracted_frames - 1)
                         
-                    # Trigger if sustained for 1.5 seconds (45 frames) or instantly for phone
-                    if self._distracted_frames > 45 or object_scores.get("phone", 0.0) > 0.5 or object_scores.get("danger", 0.0) > 0.5:
+                    # Trigger if sustained for 1.5 seconds or instantly for phone
+                    if self._distracted_frames > trigger_frames or object_scores.get("phone", 0.0) > 0.5 or object_scores.get("danger", 0.0) > 0.5:
                         self._current_state = "Distracted"
                         self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
 
