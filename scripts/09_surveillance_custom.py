@@ -512,10 +512,9 @@ class SurveillancePipeline:
                     is_alert_heuristic = (
                         not head_distracted and
                         not eyes_closed_or_off and
-                        feats.get("perclos", 1.0) < 0.15 and
-                        feats.get("mar", 0.0) < 0.2 and
-                        abs(phys_yaw) < 15.0 and
-                        abs(phys_pitch) < 15.0
+                        feats.get("mar", 0.0) < 0.3 and
+                        abs(phys_yaw) < 20.0 and
+                        abs(phys_pitch) < 20.0
                     )
                         
                     # Trigger Distracted if head sustained, or instantly for phone/danger
