@@ -151,10 +151,13 @@ body {
     justify-content: center;
     overflow: hidden;
 }
-.video-panel img {
+.video-panel img, .video-panel canvas {
+    position: absolute;
     width: 100%;
     height: 100%;
     object-fit: contain;
+    top: 0;
+    left: 0;
 }
 
 /* State overlay on video */
@@ -433,6 +436,7 @@ body {
 <div class="layout">
     <div class="video-panel">
         <img id="video-feed" src="/video_feed" alt="Camera feed">
+        <canvas id="overlay"></canvas>
         <div class="state-overlay alert" id="state-overlay">
             <span class="state-label" id="state-label">ALERT</span>
             <span class="state-conf" id="state-conf">--</span>
@@ -593,6 +597,63 @@ body {
             }
             if (eventLog.length > 20) eventLog = eventLog.slice(0, 20);
             renderEvents();
+        }
+
+        drawOverlay(d);
+    }
+
+    function drawOverlay(d) {
+        const img = $('video-feed');
+        const cvs = $('overlay');
+        
+        const rect = img.getBoundingClientRect();
+        cvs.width = rect.width;
+        cvs.height = rect.height;
+        const ctx = cvs.getContext('2d');
+        ctx.clearRect(0, 0, cvs.width, cvs.height);
+
+        if (!img.naturalWidth || !img.naturalHeight) return;
+
+        const imgAspect = img.naturalWidth / img.naturalHeight;
+        const panelAspect = cvs.width / cvs.height;
+        
+        let drawW, drawH, offsetX, offsetY;
+        if (imgAspect > panelAspect) {
+            drawW = cvs.width;
+            drawH = cvs.width / imgAspect;
+            offsetX = 0;
+            offsetY = (cvs.height - drawH) / 2;
+        } else {
+            drawH = cvs.height;
+            drawW = cvs.height * imgAspect;
+            offsetX = (cvs.width - drawW) / 2;
+            offsetY = 0;
+        }
+
+        const mapX = x => offsetX + (x / 640) * drawW;
+        const mapY = y => offsetY + (y / 480) * drawH;
+
+        ctx.lineWidth = 2;
+        ctx.font = "bold 14px Inter";
+
+        if (d.driver_box) {
+            const [x1, y1, x2, y2] = d.driver_box;
+            const stateColorsMap = { Alert: '#22c55e', Drowsy: '#f59e0b', Distracted: '#ef4444' };
+            ctx.strokeStyle = stateColorsMap[d.state] || '#ffffff';
+            ctx.strokeRect(mapX(x1), mapY(y1), mapX(x2) - mapX(x1), mapY(y2) - mapY(y1));
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.fillText("DRIVER", mapX(x1), mapY(y1) - 6);
+        }
+
+        if (d.detected_objects && d.detected_objects.length > 0) {
+            d.detected_objects.forEach(obj => {
+                const [x1, y1, x2, y2] = obj.box;
+                const color = obj.label === 'phone' ? '#fb923c' : (obj.label === 'food' ? '#34d399' : '#ef4444');
+                ctx.strokeStyle = color;
+                ctx.fillStyle = color;
+                ctx.strokeRect(mapX(x1), mapY(y1), mapX(x2) - mapX(x1), mapY(y2) - mapY(y1));
+                ctx.fillText(obj.label.toUpperCase() + " " + Math.round(obj.conf * 100) + "%", mapX(x1), mapY(y1) - 6);
+            });
         }
     }
 

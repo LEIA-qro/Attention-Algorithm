@@ -25,7 +25,7 @@ yolo:
 
   # --- Object detection (Layer 3) ---
   object_conf_thresh: 0.45
-  roi_padding_px: 30
+  roi_padding_px: 150
   imgsz: 320
   person_imgsz: 256
 
