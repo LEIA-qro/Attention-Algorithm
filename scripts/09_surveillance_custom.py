@@ -446,7 +446,7 @@ class SurveillancePipeline:
                         head_distracted = True
                         
                     if head_distracted:
-                        self._distracted_frames += 1
+                        self._distracted_frames = min(60, self._distracted_frames + 1)
                     else:
                         self._distracted_frames = max(0, self._distracted_frames - 1)
                         
