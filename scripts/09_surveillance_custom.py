@@ -440,9 +440,9 @@ class SurveillancePipeline:
                     ear = feats.get("ear_avg", 1.0)
                     
                     head_distracted = False
-                    if abs(phys_yaw) > 30.0:
+                    if abs(phys_yaw) > 25.0:
                         head_distracted = True
-                    elif abs(phys_pitch) > 25.0 or abs(gaze_pitch) > 40.0:
+                    elif abs(phys_pitch) > 20.0 or abs(gaze_pitch) > 35.0:
                         head_distracted = True
                         
                     trigger_frames = int(1.5 * self._fps)

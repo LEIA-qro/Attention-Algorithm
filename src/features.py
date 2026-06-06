@@ -443,7 +443,7 @@ class FeatureExtractor:
         self._nod_timestamps: Deque[float] = deque(maxlen=500)
 
         # EAR calibration
-        calib_frames = ear_cfg.get("calibration_frames", 894)
+        calib_frames = ear_cfg.get("calibration_frames", 60)
         self._calibration = _EARCalibration(target_frames=calib_frames)
 
         # Blink tracker
