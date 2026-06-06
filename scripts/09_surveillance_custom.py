@@ -316,6 +316,7 @@ class SurveillancePipeline:
         self._recent_saved: Deque[Tuple[str, float]] = deque(maxlen=5)
         self._was_heuristic_distracted: bool = False
         self._was_heuristic_drowsy: bool = False
+        self._eyes_closed_frames: int = 0
         self._driver_missing_frames: int = 0
         self._show_help: bool = False
         
@@ -488,16 +489,33 @@ class SurveillancePipeline:
                         # Drop 3x faster to return to normal instantly
                         self._distracted_frames = max(0, self._distracted_frames - 3)
                         
+                    # Fix inconsistency by combining ear_avg and eyes_off_road_pct
+                    eyes_closed_or_off = (feats.get("ear_avg", 1.0) < 0.22 or feats.get("eyes_off_road_pct", 0.0) > 0.6)
+                    if eyes_closed_or_off:
+                        self._eyes_closed_frames += 1
+                    else:
+                        self._eyes_closed_frames = max(0, self._eyes_closed_frames - 3)
+                        
                     is_distracted_heuristic = (
                         self._distracted_frames > trigger_frames or 
                         object_scores.get("phone", 0.0) > 0.45 or 
-                        object_scores.get("danger", 0.0) > 0.45
+                        object_scores.get("danger", 0.0) > 0.45 or
+                        self._eyes_closed_frames > 2.0 * current_fps  # Distracted takes priority after 2s of eyes closed
                     )
                     
                     is_drowsy_heuristic = (
                         feats.get("perclos", 0.0) > 0.4 or 
-                        feats.get("ear_avg", 1.0) < 0.2 or 
-                        feats.get("mar", 0.0) > 0.45
+                        feats.get("mar", 0.0) > 0.45 or
+                        self._eyes_closed_frames > 0.2 * current_fps  # Drowsy triggers early for eyes closed
+                    )
+                    
+                    is_alert_heuristic = (
+                        not head_distracted and
+                        not eyes_closed_or_off and
+                        feats.get("perclos", 1.0) < 0.15 and
+                        feats.get("mar", 0.0) < 0.2 and
+                        abs(phys_yaw) < 15.0 and
+                        abs(phys_pitch) < 15.0
                     )
                         
                     # Trigger Distracted if head sustained, or instantly for phone/danger
@@ -523,6 +541,11 @@ class SurveillancePipeline:
                         self._was_heuristic_drowsy = False
                         if len(self._feature_buffer) > 0:
                             self._feature_buffer.extend([self._feature_buffer[-1]] * self._seq_len)
+                        self._current_state = "Alert"
+                        self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
+                        
+                    # Fix LSTM predicting Drowsy when user is clearly Alert
+                    elif is_alert_heuristic:
                         self._current_state = "Alert"
                         self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
 
