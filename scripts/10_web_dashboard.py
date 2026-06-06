@@ -160,34 +160,37 @@ body {
 /* State overlay on video */
 .state-overlay {
     position: absolute;
-    top: 20px;
-    left: 20px;
+    top: 24px;
+    left: 24px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 18px;
+    gap: 12px;
+    padding: 14px 24px;
     border-radius: var(--radius);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 2px solid rgba(255,255,255,0.15);
     transition: background 0.3s, border-color 0.3s;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
-.state-overlay.alert { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.25); }
-.state-overlay.drowsy { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.25); }
-.state-overlay.distracted { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.25); }
+.state-overlay.alert { background: rgba(34, 197, 94, 0.25); border-color: rgba(34, 197, 94, 0.5); }
+.state-overlay.drowsy { background: rgba(245, 158, 11, 0.25); border-color: rgba(245, 158, 11, 0.5); }
+.state-overlay.distracted { background: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 0.5); }
 
 .state-label {
-    font-weight: 700;
-    font-size: 18px;
-    letter-spacing: 0.5px;
+    font-weight: 800;
+    font-size: 24px;
+    letter-spacing: 1px;
     text-transform: uppercase;
     transition: color 0.3s;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
 }
 .state-conf {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
+    font-size: 18px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
     font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
 
 /* ---- Sidebar ---- */
@@ -602,8 +605,12 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
     )
 
     if isinstance(source, int):
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        # Prevent buffer buildup (slow motion lag)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     if not cap.isOpened():
         logger.error("Cannot open camera source: %s", source)
