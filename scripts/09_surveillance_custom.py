@@ -178,7 +178,7 @@ def _draw_hud(
     cv2.putText(out, f"FPS:{fps:.0f}", (w - 110, h - 10), small, 1.1, (140, 140, 140), 1)
     
     if feats:
-        debug_txt = f"YAW:{feats.get('pitch', 0):.0f} PITCH:{feats.get('roll', 0):.0f} EAR:{feats.get('ear_avg', 0):.2f}"
+        debug_txt = f"YAW:{feats.get('pitch', 0):.0f} PITCH:{feats.get('roll', 0):.0f} EAR:{feats.get('ear_avg', 0):.2f} MAR:{feats.get('mar', 0):.2f}"
         cv2.putText(out, debug_txt, (10, h - 10), small, 1.0, (0, 255, 255), 1)
 
     if buffering_pct < 1.0:
@@ -358,7 +358,7 @@ class SurveillancePipeline:
 
                 consecutive_failures = 0
                 self._frame_count += 1
-                timestamp_ms = int(self._frame_count * (1000.0 / self._fps))
+                timestamp_ms = int(time.time() * 1000)
                 timestamp_s = timestamp_ms / 1000.0
 
                 # Stage 1: person detection + driver isolation (optimize YOLO call frequency)
@@ -465,8 +465,8 @@ class SurveillancePipeline:
                     elif abs(phys_pitch) > 20.0 or abs(gaze_pitch) > 35.0:
                         head_distracted = True
                         
-                    trigger_frames = int(1.5 * self._fps)
-                    cap_frames = int(2.0 * self._fps)
+                    trigger_frames = int(1.0 * current_fps)  # 1.0 seconds
+                    cap_frames = int(1.5 * current_fps)  # max 1.5s
                         
                     if head_distracted:
                         self._distracted_frames = min(cap_frames, self._distracted_frames + 1)
@@ -480,8 +480,8 @@ class SurveillancePipeline:
                         self._current_state = "Distracted"
                         self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
                         
-                    # Trigger Drowsy if perclos is high or eyes currently closed
-                    elif feats.get("perclos", 0.0) > 0.4 or feats.get("ear_avg", 1.0) < 0.2:
+                    # Trigger Drowsy if perclos is high, eyes currently closed, or yawning
+                    elif feats.get("perclos", 0.0) > 0.4 or feats.get("ear_avg", 1.0) < 0.2 or feats.get("mar", 0.0) > 0.45:
                         self._current_state = "Drowsy"
                         self._current_probs = np.array([0.05, 0.90, 0.05], dtype=np.float32)
 
