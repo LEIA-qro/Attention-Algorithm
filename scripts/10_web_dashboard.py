@@ -564,7 +564,7 @@ def _pipeline_thread(pipeline):
     """Run the surveillance pipeline in a background thread, updating globals."""
     global _latest_jpeg, _latest_telemetry
     for raw_frame, hud_frame, telemetry in pipeline.run_generator():
-        _, buf = cv2.imencode(".jpg", hud_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        _, buf = cv2.imencode(".jpg", hud_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
         with _lock:
             _latest_jpeg = buf.tobytes()
             _latest_telemetry = telemetry

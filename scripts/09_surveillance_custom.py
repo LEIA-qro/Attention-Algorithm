@@ -254,13 +254,17 @@ class SurveillancePipeline:
                 if isinstance(source, int) and sys.platform == "win32"
                 else cv2.VideoCapture(source)
             )
-            if not self._cap.isOpened():
-                raise RuntimeError(f"Cannot open source: {source}")
+            if isinstance(self._source, int):
+                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-            self._frame_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            self._frame_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            actual_fps = self._cap.get(cv2.CAP_PROP_FPS)
-            self._fps: float = actual_fps if actual_fps > 0 else fps_hint
+            if self._cap.isOpened():
+                self._frame_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                self._frame_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                actual_fps = self._cap.get(cv2.CAP_PROP_FPS)
+                self._fps: float = actual_fps if actual_fps > 0 else fps_hint
+            else:
+                raise RuntimeError(f"Cannot open source: {source}")
 
             self._tracker = CustomDriverTracker(yolo_cfg, self._frame_w, self._frame_h)
             self._engine = EventEngine(events_cfg, fps=self._fps)
