@@ -5,24 +5,24 @@
 
 # Project Paths
 paths:
-  project_root: "d:/Antigravity/Attention"
-  data_root: "d:/Antigravity/Attention/data"
-  raw_data: "d:/Antigravity/Attention/data/raw"
-  processed_data: "d:/Antigravity/Attention/data/processed"
-  features_dir: "d:/Antigravity/Attention/data/features"
-  checkpoints_dir: "d:/Antigravity/Attention/checkpoints"
-  logs_dir: "d:/Antigravity/Attention/logs"
-  tensorboard_dir: "d:/Antigravity/Attention/runs"
-  exports_dir: "d:/Antigravity/Attention/exports"
+  project_root: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm"
+  data_root: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data"
+  raw_data: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw"
+  processed_data: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/processed"
+  features_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/features"
+  checkpoints_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/checkpoints"
+  logs_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/logs"
+  tensorboard_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/runs"
+  exports_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/exports"
 
   # Dataset paths
-  dmd_distraction: "d:/Antigravity/Attention/data/raw/DMD-Distraction"
-  dmd_drowsiness: "d:/Antigravity/Attention/data/raw/DMD-Drowsiness"
-  uta_rldd: "d:/Antigravity/Attention/data/raw/UTA-RLDD"
-  auc_v2: "d:/Antigravity/Attention/data/raw/AUC-V2"
+  dmd_distraction: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/DMD-Distraction"
+  dmd_drowsiness: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/DMD-Drowsiness"
+  uta_rldd: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/UTA-RLDD"
+  auc_v2: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/AUC-V2"
 
   # MediaPipe model asset
-  mediapipe_model: "d:/Antigravity/Attention/models/face_landmarker_v2_with_blendshapes.task"
+  mediapipe_model: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/models/face_landmarker_v2_with_blendshapes.task"
 
 # MediaPipe Face Landmarker v2 Configuration
 mediapipe:
@@ -246,6 +246,6 @@ logging:
   level: "INFO"                      # DEBUG | INFO | WARNING | ERROR
   console: true
   file: true
-  log_file: "d:/Antigravity/Attention/logs/training.log"
+  log_file: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/logs/training.log"
   tensorboard: true
   log_every_n_steps: 50

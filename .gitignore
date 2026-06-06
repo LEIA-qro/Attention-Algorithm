@@ -34,3 +34,11 @@ scratch/
 
 # We WANT to track the models because they are very small (< 4MB)
 # So we do NOT ignore the models directory!
+
+# Surveillance output
+output/clips/*.mp4
+output/logs/*.csv
+output/logs/*.json
+/tests
+/docs
+*.md
