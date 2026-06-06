@@ -123,6 +123,7 @@ def _draw_hud(
     buffering_pct: float,
     show_help: bool,
     detected_objects: List[Dict[str, Any]] = None,
+    feats: Dict[str, float] = None,
 ) -> np.ndarray:
     out = frame.copy()
     h, w = out.shape[:2]
@@ -175,6 +176,10 @@ def _draw_hud(
                     font, 0.65, EVENT_COLOURS.get(evt, (200, 200, 200)), 2)
 
     cv2.putText(out, f"FPS:{fps:.0f}", (w - 110, h - 10), small, 1.1, (140, 140, 140), 1)
+    
+    if feats:
+        debug_txt = f"YAW:{feats.get('pitch', 0):.0f} PITCH:{feats.get('roll', 0):.0f} EAR:{feats.get('ear_avg', 0):.2f}"
+        cv2.putText(out, debug_txt, (10, h - 10), small, 1.0, (0, 255, 255), 1)
 
     if buffering_pct < 1.0:
         cv2.putText(out, f"Buffering {buffering_pct:.0%}", (w // 2 - 70, 30),
@@ -458,10 +463,18 @@ class SurveillancePipeline:
                     else:
                         self._distracted_frames = max(0, self._distracted_frames - 1)
                         
-                    # Trigger if sustained for 1.5 seconds or instantly for phone
-                    if self._distracted_frames > trigger_frames or object_scores.get("phone", 0.0) > 0.5 or object_scores.get("danger", 0.0) > 0.5:
+                    # Trigger Distracted if head sustained for 1.5s, or instantly for eyes_off/phone/danger
+                    if self._distracted_frames > trigger_frames or \
+                       feats.get("eyes_off_road_pct", 0.0) > 0.3 or \
+                       object_scores.get("phone", 0.0) > 0.45 or \
+                       object_scores.get("danger", 0.0) > 0.45:
                         self._current_state = "Distracted"
                         self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
+                        
+                    # Trigger Drowsy if perclos is high or eyes currently closed
+                    elif feats.get("perclos", 0.0) > 0.3 or feats.get("ear_avg", 1.0) < 0.2:
+                        self._current_state = "Drowsy"
+                        self._current_probs = np.array([0.05, 0.90, 0.05], dtype=np.float32)
 
                 # Stage 4: event engine
                 signal = SignalFrame(
@@ -471,7 +484,7 @@ class SurveillancePipeline:
                     drowsy_prob=float(probs[1]) if probs is not None else 0.0,
                     distracted_prob=float(probs[2]),
                     alert_prob=float(probs[0]),
-                    eyes_off_road_pct=feats.get("eyes_off_road_pct", 0.0),
+                    eyes_off_road_pct=feats.get("eyes_off_road_pct", 0.0) if feats else 0.0,
                     timestamp_s=timestamp_s,
                 )
                 triggers = self._engine.update(signal)
@@ -496,6 +509,7 @@ class SurveillancePipeline:
                     buffering_pct=len(self._feature_buffer) / self._seq_len,
                     show_help=self._show_help,
                     detected_objects=detected_objects,
+                    feats=feats,
                 )
 
                 # Push to clip ring buffer
