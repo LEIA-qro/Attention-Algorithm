@@ -667,12 +667,9 @@ class SurveillancePipeline:
                     if key == ord("q"):
                         break
                     elif key == ord("r"):
-                        self._reset()
+                        self.reset()
                     elif key == ord("c"):
-                        logger.info("Recalibrating baseline pose...")
-                        if self._current_feats:
-                            self._baseline_yaw = self._current_feats.get("pitch", 0.0)
-                            self._baseline_pitch = self._current_feats.get("roll", 0.0)
+                        self.calibrate()
                     elif key == ord("h"):
                         self._show_help = not self._show_help
 
@@ -738,7 +735,7 @@ class SurveillancePipeline:
             )
             self._recent_saved.append((trigger["event_type"], timestamp_s))
 
-    def _reset(self) -> None:
+    def reset(self) -> None:
         logger.info("Resetting state.")
         self._tracker.reset()
         self._extractor.reset()
@@ -750,6 +747,12 @@ class SurveillancePipeline:
         self._current_detected_objects.clear()
         self._current_feats.clear()
         self._collecting_post.clear()
+
+    def calibrate(self) -> None:
+        logger.info("Recalibrating baseline pose...")
+        if self._current_feats:
+            self._baseline_yaw = self._current_feats.get("pitch", 0.0)
+            self._baseline_pitch = self._current_feats.get("roll", 0.0)
 
 
 def main() -> None:

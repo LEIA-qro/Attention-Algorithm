@@ -287,6 +287,32 @@ body {
     color: var(--text-primary);
 }
 
+/* Action buttons */
+.actions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+.btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+.btn:active {
+    transform: scale(0.98);
+}
+
 /* Objects */
 .object-tag {
     display: inline-flex;
@@ -431,6 +457,15 @@ body {
             <div class="card-header">Detected Objects</div>
             <div id="objects-container">
                 <span class="objects-empty">No objects detected</span>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="card">
+            <div class="card-header">Controls</div>
+            <div class="actions-grid">
+                <button class="btn" onclick="fetch('/api/calibrate', {method: 'POST'})">Calibrate</button>
+                <button class="btn" onclick="fetch('/api/reset', {method: 'POST'})">Reset</button>
             </div>
         </div>
 
@@ -581,11 +616,13 @@ def _setup_logging(level: str = "INFO"):
 # Shared state (all protected by _lock)
 # ---------------------------------------------------------------------------
 _lock = threading.Lock()
+_frame_cond = threading.Condition(_lock)
 _latest_frame: np.ndarray | None = None      # Raw high-res camera frame
 _latest_jpeg: bytes = b""                      # JPEG-encoded display frame
 _latest_telemetry: dict = {}                   # Last inference result
 _camera_fps: float = 0.0                       # Camera capture FPS
 _running: bool = True                          # Shutdown flag
+_pipeline = None                               # Global pipeline instance
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +683,7 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
             with _lock:
                 _latest_frame = frame
                 _latest_jpeg = buf.tobytes()
+                _frame_cond.notify_all()
     finally:
         cap.release()
         logger.info("Camera thread stopped.")
@@ -702,14 +740,26 @@ def video_feed():
     def gen():
         while True:
             with _lock:
+                _frame_cond.wait()
                 frame = _latest_jpeg
             if frame:
                 yield (
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                 )
-            time.sleep(0.033)  # ~30 fps cap
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+@app.route("/api/reset", methods=["POST"])
+def api_reset():
+    if _pipeline:
+        _pipeline.reset()
+    return {"status": "ok"}
+
+@app.route("/api/calibrate", methods=["POST"])
+def api_calibrate():
+    if _pipeline:
+        _pipeline.calibrate()
+    return {"status": "ok"}
 
 
 @app.route("/telemetry_feed")
@@ -816,6 +866,9 @@ def main():
                 np.array(norm["mean"], dtype=np.float32),
                 np.array(norm["std"], dtype=np.float32),
             )
+
+    global _pipeline
+    _pipeline = pipeline
 
     logger.info("=" * 60)
     logger.info("DMS WEB DASHBOARD (Decoupled Architecture)")
