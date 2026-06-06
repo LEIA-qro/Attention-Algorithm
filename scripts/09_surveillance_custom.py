@@ -305,6 +305,7 @@ class SurveillancePipeline:
         self._collecting_post: Dict[str, Dict[str, Any]] = {}
         self._fps_times: Deque[float] = deque(maxlen=60)
         self._recent_saved: Deque[str] = deque(maxlen=5)
+        self._driver_missing_frames: int = 0
         self._show_help: bool = False
         
         # Heuristic state overrides
@@ -380,12 +381,16 @@ class SurveillancePipeline:
 
                 # Stage 2: MediaPipe + DriverStateNet (optimize CPU by skipping MediaPipe extraction)
                 if driver_box is None:
-                    self._current_object_scores = {}
-                    self._current_detected_objects = []
-                    self._current_state = "Alert"
-                    self._current_probs = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-                    self._feature_buffer.clear()
-                    self._current_feats = {}
+                    self._driver_missing_frames += 1
+                    if self._driver_missing_frames > 15:
+                        self._current_object_scores = {}
+                        self._current_detected_objects = []
+                        self._current_state = "Alert"
+                        self._current_probs = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+                        self._feature_buffer.clear()
+                        self._current_feats = {}
+                else:
+                    self._driver_missing_frames = 0
 
                 probs = self._current_probs
                 feats = self._current_feats
@@ -463,7 +468,7 @@ class SurveillancePipeline:
                     phone=object_scores.get("phone", 0.0),
                     food=object_scores.get("food", 0.0),
                     danger=object_scores.get("danger", 0.0),
-                    drowsy_prob=0.0,  # Disabled tracking drowsy per user request
+                    drowsy_prob=float(probs[1]) if probs is not None else 0.0,
                     distracted_prob=float(probs[2]),
                     alert_prob=float(probs[0]),
                     eyes_off_road_pct=feats.get("eyes_off_road_pct", 0.0),
