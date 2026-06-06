@@ -268,9 +268,12 @@ def detect_objects_in_roi(
         return event_scores, detected_objects
 
     h, w = frame.shape[:2]
+    # We still calculate padded to potentially filter later, but we run YOLO on full frame
     padded = pad_box(driver_box, padding, w, h)
-    x1, y1, x2, y2 = int(padded[0]), int(padded[1]), int(padded[2]), int(padded[3])
-    roi = frame[y1:y2, x1:x2]
+    
+    # Bypass ROI cropping to ensure objects like phones held wide are never clipped out
+    roi = frame
+    x1, y1 = 0, 0
     if roi.size == 0:
         return event_scores, detected_objects
 

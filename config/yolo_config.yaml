@@ -26,7 +26,7 @@ yolo:
   # --- Object detection (Layer 3) ---
   object_conf_thresh: 0.20
   roi_padding_px: 150
-  imgsz: 320
+  imgsz: 640
   person_imgsz: 256
 
   # COCO class IDs to detect
