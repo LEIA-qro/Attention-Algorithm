@@ -312,6 +312,14 @@ body {
 .btn:active {
     transform: scale(0.98);
 }
+.btn.danger {
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+.btn.danger:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.5);
+}
 
 /* Objects */
 .object-tag {
@@ -487,8 +495,9 @@ body {
         <div class="card">
             <div class="card-header">Controls</div>
             <div class="actions-grid">
-                <button class="btn" onclick="doAction('calibrate')">Calibrate</button>
-                <button class="btn" onclick="doAction('reset')">Reset</button>
+                <button class="btn" onclick="window.doAction('calibrate')">Calibrate</button>
+                <button class="btn" onclick="window.doAction('reset')">Reset</button>
+                <button class="btn danger" onclick="window.doAction('shutdown')" style="grid-column: span 2;">Stop System</button>
             </div>
         </div>
 
@@ -600,13 +609,19 @@ body {
         }).join('');
     }
 
-    function doAction(action) {
+    window.doAction = function(action) {
         fetch('/api/' + action, {method: 'POST'})
             .then(() => {
-                const msg = action === 'calibrate' ? 'Calibrated to current head position' : 'System reset to default state';
-                showToast(msg);
+                if (action === 'calibrate') {
+                    showToast('Calibrated zero-point to current head position');
+                } else if (action === 'reset') {
+                    showToast('System memory & buffers reset to Alert state');
+                } else if (action === 'shutdown') {
+                    showToast('Shutting down system...');
+                    setTimeout(() => window.close(), 1000);
+                }
             });
-    }
+    };
 
     function showToast(msg) {
         const toast = $('toast');
@@ -799,6 +814,19 @@ def api_reset():
 def api_calibrate():
     if _pipeline:
         _pipeline.calibrate()
+    return {"status": "ok"}
+
+@app.route("/api/shutdown", methods=["POST"])
+def api_shutdown():
+    global _running
+    _running = False
+    
+    # Run shutdown gracefully in background
+    def delay_shutdown():
+        time.sleep(1.0)
+        os._exit(0)
+    threading.Thread(target=delay_shutdown).start()
+    
     return {"status": "ok"}
 
 
