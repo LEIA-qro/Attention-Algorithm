@@ -824,12 +824,12 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
 # ---------------------------------------------------------------------------
 # Thread 2: AI inference on downscaled frames
 # ---------------------------------------------------------------------------
-_AI_WIDTH = 640
-_AI_HEIGHT = 360
+_AI_WIDTH = 960
+_AI_HEIGHT = 540
 
 
 def _inference_thread(pipeline):
-    """Grab latest camera frame, run AI, store telemetry."""
+    """Grab latest camera frame, moderately downscale, run AI, store telemetry."""
     global _latest_telemetry, _running
 
     while _running:
@@ -840,8 +840,16 @@ def _inference_thread(pipeline):
             time.sleep(0.01)
             continue
 
+        # Moderate downscale: 960x540 keeps enough detail for YOLO while
+        # being fast enough for MediaPipe (which runs every frame).
+        h, w = frame.shape[:2]
+        if w != _AI_WIDTH or h != _AI_HEIGHT:
+            ai_frame = cv2.resize(frame, (_AI_WIDTH, _AI_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        else:
+            ai_frame = frame
+
         try:
-            telemetry = pipeline.process_frame(frame)
+            telemetry = pipeline.process_frame(ai_frame)
             with _lock:
                 _latest_telemetry = telemetry
         except Exception:
@@ -991,8 +999,8 @@ def main():
         project_root=_PROJECT_ROOT,
         backend=args.backend,
         hef_path=hef_path,
-        frame_w=args.res_w,
-        frame_h=args.res_h,
+        frame_w=_AI_WIDTH,
+        frame_h=_AI_HEIGHT,
     )
 
     fc_path = models_dir / "feature_config.json"

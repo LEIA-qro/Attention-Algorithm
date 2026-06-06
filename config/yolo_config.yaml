@@ -3,8 +3,8 @@
 
 yolo:
   # --- AI Models ---
-  # yolov8n.pt (Nano) generalized better for the phone and cup in this environment
-  model_path: "yolov8n.pt"
+  # yolov8s.pt (Small) for better accuracy; 960x540 AI resolution provides enough detail
+  model_path: "yolov8s.pt"
   device: "cuda"
 
   # --- Person detection (Layer 1) ---
