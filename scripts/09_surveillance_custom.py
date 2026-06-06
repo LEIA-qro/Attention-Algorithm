@@ -568,6 +568,10 @@ class SurveillancePipeline:
         for trigger in triggers:
             evt = trigger["event_type"]
             if evt not in self._collecting_post:
+                # Add to recent events instantly so UI reflects it's recording
+                self._recent_saved.append((evt, timestamp_s))
+                
+                # Contiguous Frame Deduplication: snapshot the current ring buffer frames
                 pre_frames = [f.copy() for f, _ in self._clip_writer._ring_buffer]
                 self._collecting_post[evt] = {
                     "pre_frames": pre_frames,
@@ -733,7 +737,6 @@ class SurveillancePipeline:
                 clip_path=clip_path,
                 driver_box=self._current_driver_box,
             )
-            self._recent_saved.append((trigger["event_type"], timestamp_s))
 
     def reset(self) -> None:
         logger.info("Resetting state.")

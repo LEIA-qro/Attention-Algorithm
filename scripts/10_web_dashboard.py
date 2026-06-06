@@ -372,6 +372,29 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* Toast Notification */
+.toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(34, 197, 94, 0.9);
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: var(--radius);
+    font-weight: 600;
+    font-size: 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+}
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 800px) {
     .layout {
@@ -464,8 +487,8 @@ body {
         <div class="card">
             <div class="card-header">Controls</div>
             <div class="actions-grid">
-                <button class="btn" onclick="fetch('/api/calibrate', {method: 'POST'})">Calibrate</button>
-                <button class="btn" onclick="fetch('/api/reset', {method: 'POST'})">Reset</button>
+                <button class="btn" onclick="doAction('calibrate')">Calibrate</button>
+                <button class="btn" onclick="doAction('reset')">Reset</button>
             </div>
         </div>
 
@@ -478,6 +501,8 @@ body {
         </div>
     </div>
 </div>
+
+<div id="toast" class="toast"></div>
 
 <script>
 (function() {
@@ -573,6 +598,21 @@ body {
             const ts = e.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             return '<div class="event-item"><div class="event-dot ' + e.type + '"></div><span class="event-text">' + label + ' &middot; ' + ts + '</span></div>';
         }).join('');
+    }
+
+    function doAction(action) {
+        fetch('/api/' + action, {method: 'POST'})
+            .then(() => {
+                const msg = action === 'calibrate' ? 'Calibrated to current head position' : 'System reset to default state';
+                showToast(msg);
+            });
+    }
+
+    function showToast(msg) {
+        const toast = $('toast');
+        toast.textContent = msg;
+        toast.className = 'toast show';
+        setTimeout(() => { toast.className = 'toast'; }, 3000);
     }
 
     function connectSSE() {
@@ -740,13 +780,13 @@ def video_feed():
     def gen():
         while True:
             with _lock:
-                _frame_cond.wait()
                 frame = _latest_jpeg
             if frame:
                 yield (
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                 )
+            time.sleep(0.040)  # ~25 fps cap (prevents browser buffer bloat!)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/api/reset", methods=["POST"])
