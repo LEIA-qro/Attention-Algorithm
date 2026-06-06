@@ -181,9 +181,7 @@ def _draw_hud(
         debug_txt = f"YAW:{feats.get('pitch', 0):.0f} PITCH:{feats.get('roll', 0):.0f} EAR:{feats.get('ear_avg', 0):.2f} MAR:{feats.get('mar', 0):.2f}"
         cv2.putText(out, debug_txt, (10, h - 10), small, 1.0, (0, 255, 255), 1)
 
-    if buffering_pct < 1.0:
-        cv2.putText(out, f"Buffering {buffering_pct:.0%}", (w // 2 - 70, 30),
-                    font, 0.65, (200, 200, 200), 1)
+    # Removed buffering text to avoid annoying the user
 
     if show_help:
         lines = ["Controls:", "  q - Quit", "  r - Reset state", "  h - Toggle help"]
@@ -315,7 +313,7 @@ class SurveillancePipeline:
         # key=event_type → {"pre_frames": list, "frames": [], "remaining": int, "trigger": dict}
         self._collecting_post: Dict[str, Dict[str, Any]] = {}
         self._fps_times: Deque[float] = deque(maxlen=60)
-        self._recent_saved: Deque[str] = deque(maxlen=5)
+        self._recent_saved: Deque[Tuple[str, float]] = deque(maxlen=5)
         self._driver_missing_frames: int = 0
         self._show_help: bool = False
         
@@ -518,7 +516,7 @@ class SurveillancePipeline:
                     state=self._current_state,
                     probs=self._current_probs,
                     object_scores=object_scores,
-                    recent_events=list(self._recent_saved),
+                    recent_events=[evt for evt, t in self._recent_saved if timestamp_s - t < 3.0],
                     fps=current_fps,
                     buffering_pct=len(self._feature_buffer) / self._seq_len,
                     show_help=self._show_help,
@@ -621,7 +619,7 @@ class SurveillancePipeline:
                 clip_path=clip_path,
                 driver_box=self._current_driver_box,
             )
-            self._recent_saved.append(trigger["event_type"])
+            self._recent_saved.append((trigger["event_type"], current_s))
 
     def _reset(self) -> None:
         logger.info("Resetting state.")
