@@ -38,6 +38,8 @@ yolo:
     47: "apple"
     76: "scissors"
     43: "knife"
+    65: "remote"
+    73: "book"
 
   # Maps class IDs to event categories used by EventEngine
   class_to_event:
