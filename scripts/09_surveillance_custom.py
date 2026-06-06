@@ -581,6 +581,23 @@ class SurveillancePipeline:
                 }
 
         # Build telemetry dict
+        # --- UI Display Boxes ---
+        face_box = None
+        if self._extractor._last_result and self._extractor._last_result.face_landmarks:
+            try:
+                lms = self._extractor._last_result.face_landmarks[0]
+                h, w = raw_frame.shape[:2]
+                xs = [lm.x for lm in lms]
+                ys = [lm.y for lm in lms]
+                x1, y1 = int(min(xs) * w), int(min(ys) * h)
+                x2, y2 = int(max(xs) * w), int(max(ys) * h)
+                
+                # Add 15% padding
+                px, py = int(0.15 * (x2 - x1)), int(0.15 * (y2 - y1))
+                face_box = [max(0, x1 - px), max(0, y1 - py), min(w, x2 + px), min(h, y2 + py)]
+            except IndexError:
+                pass
+
         telemetry = {
             "state": self._current_state,
             "probs": {
@@ -601,6 +618,7 @@ class SurveillancePipeline:
             "triggers": [t["event_type"] for t in triggers],
             "frame_count": self._frame_count,
             "driver_box": [int(v) for v in driver_box] if driver_box is not None else None,
+            "face_box": [int(v) for v in face_box] if face_box is not None else None,
             "detected_objects": detected_objects,
         }
 

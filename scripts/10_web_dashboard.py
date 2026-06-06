@@ -503,6 +503,14 @@ body {
                 <button class="btn" onclick="window.doAction('reset')">Reset</button>
                 <button class="btn danger" onclick="window.doAction('shutdown')" style="grid-column: span 2;">Stop System</button>
             </div>
+            <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-secondary); cursor: pointer;">
+                    <input type="checkbox" id="toggle-boxes" checked style="accent-color: var(--accent); cursor: pointer;"> Show Bounding Boxes
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-secondary); cursor: pointer;">
+                    <input type="checkbox" id="toggle-face" checked style="accent-color: var(--accent); cursor: pointer;"> Prefer Face Box
+                </label>
+            </div>
         </div>
 
         <!-- Events -->
@@ -636,8 +644,14 @@ body {
         ctx.lineWidth = 2;
         ctx.font = "bold 14px Inter";
 
-        if (d.driver_box) {
-            const [x1, y1, x2, y2] = d.driver_box;
+        const showBoxes = $('toggle-boxes').checked;
+        const preferFace = $('toggle-face').checked;
+
+        if (!showBoxes) return;
+
+        let boxToDraw = preferFace && d.face_box ? d.face_box : d.driver_box;
+        if (boxToDraw) {
+            const [x1, y1, x2, y2] = boxToDraw;
             const stateColorsMap = { Alert: '#22c55e', Drowsy: '#f59e0b', Distracted: '#ef4444' };
             ctx.strokeStyle = stateColorsMap[d.state] || '#ffffff';
             ctx.strokeRect(mapX(x1), mapY(y1), mapX(x2) - mapX(x1), mapY(y2) - mapY(y1));
