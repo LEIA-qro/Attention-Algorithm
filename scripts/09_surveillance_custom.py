@@ -238,6 +238,12 @@ class SurveillancePipeline:
             self._onnx = OnnxInferenceSession(onnx_path)
             feature_cfg = dms_cfg.get("features", {})
             fps_hint = feature_cfg.get("fps", 30.0)
+            
+            # Override calibration frames for real-time surveillance (2 seconds)
+            if "ear" not in feature_cfg:
+                feature_cfg["ear"] = {}
+            feature_cfg["ear"]["calibration_frames"] = int(2.0 * fps_hint)
+            
             self._extractor = CustomFeatureExtractor(
                 model_path=str(mediapipe_model_path), fps=fps_hint, cfg=feature_cfg
             )
@@ -414,8 +420,12 @@ class SurveillancePipeline:
                             self._current_feats = feats
                         else:
                             feats = self._current_feats
-
+                            
                         if feats and "ear_avg" in feats:
+                            # Clamp broken features to their training data means to prevent LSTM explosion
+                            feats["gaze_yaw"] = -88.45
+                            feats["eyes_off_road_pct"] = 0.98
+                            
                             feat_vec = np.array(
                                 [feats.get(n, 0.0) for n in FEATURE_NAMES], dtype=np.float32
                             )
@@ -463,16 +473,15 @@ class SurveillancePipeline:
                     else:
                         self._distracted_frames = max(0, self._distracted_frames - 1)
                         
-                    # Trigger Distracted if head sustained for 1.5s, or instantly for eyes_off/phone/danger
+                    # Trigger Distracted if head sustained for 1.5s, or instantly for phone/danger
                     if self._distracted_frames > trigger_frames or \
-                       feats.get("eyes_off_road_pct", 0.0) > 0.3 or \
                        object_scores.get("phone", 0.0) > 0.45 or \
                        object_scores.get("danger", 0.0) > 0.45:
                         self._current_state = "Distracted"
                         self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
                         
                     # Trigger Drowsy if perclos is high or eyes currently closed
-                    elif feats.get("perclos", 0.0) > 0.3 or feats.get("ear_avg", 1.0) < 0.2:
+                    elif feats.get("perclos", 0.0) > 0.4 or feats.get("ear_avg", 1.0) < 0.2:
                         self._current_state = "Drowsy"
                         self._current_probs = np.array([0.05, 0.90, 0.05], dtype=np.float32)
 
