@@ -437,7 +437,13 @@ class SurveillancePipeline:
                             feat_vec = np.array(
                                 [feats.get(n, 0.0) for n in FEATURE_NAMES], dtype=np.float32
                             )
-                            self._feature_buffer.append(feat_vec)
+                            
+                            # Compensate for camera FPS being lower than training FPS (30.0)
+                            # by inserting the feature vector multiple times to prevent LSTM inertia
+                            insert_count = max(1, int(round(self._fps / max(1.0, current_fps))))
+                            for _ in range(insert_count):
+                                self._feature_buffer.append(feat_vec)
+                                
                             if (len(self._feature_buffer) >= self._seq_len
                                     and self._frame_count % 5 == 0):
                                 buf = np.stack(list(self._feature_buffer), axis=0)
@@ -473,8 +479,8 @@ class SurveillancePipeline:
                     elif abs(phys_pitch) > 20.0 or abs(gaze_pitch) > 35.0:
                         head_distracted = True
                         
-                    trigger_frames = int(1.0 * current_fps)  # 1.0 seconds
-                    cap_frames = int(1.5 * current_fps)  # max 1.5s
+                    trigger_frames = int(0.3 * current_fps)  # 0.3 seconds (very snappy)
+                    cap_frames = int(1.0 * current_fps)  # max 1.0s
                         
                     if head_distracted:
                         self._distracted_frames = min(cap_frames, self._distracted_frames + 1)
