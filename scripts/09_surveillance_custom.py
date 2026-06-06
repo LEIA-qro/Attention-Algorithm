@@ -648,7 +648,7 @@ class SurveillancePipeline:
                 clip_path=clip_path,
                 driver_box=self._current_driver_box,
             )
-            self._recent_saved.append((trigger["event_type"], current_s))
+            self._recent_saved.append((trigger["event_type"], timestamp_s))
 
     def _reset(self) -> None:
         logger.info("Resetting state.")
