@@ -361,6 +361,14 @@ class SurveillancePipeline:
                 timestamp_ms = int(time.time() * 1000)
                 timestamp_s = timestamp_ms / 1000.0
 
+                self._fps_times.append(time.perf_counter())
+                current_fps = 0.0
+                if len(self._fps_times) > 1:
+                    dt = self._fps_times[-1] - self._fps_times[0]
+                    current_fps = (len(self._fps_times) - 1) / dt if dt > 0 else 0
+                if current_fps <= 0.0:
+                    current_fps = self._fps
+
                 # Stage 1: person detection + driver isolation (optimize YOLO call frequency)
                 redetect_every = self._yolo_cfg.get("redetect_every_n_frames", 30)
                 should_run_yolo_person = (
@@ -497,15 +505,6 @@ class SurveillancePipeline:
                     timestamp_s=timestamp_s,
                 )
                 triggers = self._engine.update(signal)
-
-                # Generate HUD frame
-                self._fps_times.append(time.perf_counter())
-                current_fps = 0.0
-                if len(self._fps_times) > 1:
-                    dt = self._fps_times[-1] - self._fps_times[0]
-                    current_fps = (len(self._fps_times) - 1) / dt if dt > 0 else 0
-                if current_fps <= 0.0:
-                    current_fps = self._fps
 
                 hud_frame = _draw_hud(
                     frame=raw_frame,
