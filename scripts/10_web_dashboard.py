@@ -3,9 +3,27 @@
 10_web_dashboard.py — Production Web Dashboard for Driver Monitoring System
 ============================================================================
 
-Streams MJPEG video and SSE telemetry from the SurveillancePipeline to a
-modern, dark-mode web dashboard. Designed to run headlessly on a Raspberry Pi
-and be viewed from any device on the local network.
+Architecture
+------------
+Three threads, fully decoupled:
+
+1. **Camera thread** — reads from the webcam at native resolution (e.g. 720p
+   or 1080p) at the camera's native frame rate (~30 fps).  Stores the latest
+   frame in a shared variable.
+
+2. **Inference thread** — grabs the latest camera frame, downscales it to the
+   resolution the AI models were trained on (640×480), passes it through the
+   full pipeline (YOLO → MediaPipe → LSTM → heuristics → event engine), and
+   stores the resulting telemetry + bounding-box coordinates.
+
+3. **Flask server** — serves two streaming endpoints:
+   - ``/video_feed``  MJPEG at ~30 fps from the raw high-res camera frames
+   - ``/telemetry_feed``  Server-Sent Events at ~10 Hz with classification,
+     metrics, objects, and events.
+
+Because the camera thread and the inference thread are independent, the video
+feed is never bottlenecked by AI processing.  The AI metrics simply update at
+whatever rate the hardware allows (~8-15 fps on CPU).
 
 Usage
 -----
@@ -539,6 +557,10 @@ body {
 </html>"""
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _load_yaml(path: str):
     p = Path(path)
     return yaml.safe_load(p.read_text(encoding="utf-8")) or {} if p.exists() else {}
@@ -553,21 +575,108 @@ def _setup_logging(level: str = "INFO"):
 
 
 # ---------------------------------------------------------------------------
-# Globals shared between the pipeline thread and Flask routes
+# Shared state (all protected by _lock)
 # ---------------------------------------------------------------------------
-_latest_jpeg: bytes = b""
-_latest_telemetry: dict = {}
 _lock = threading.Lock()
+_latest_frame: np.ndarray | None = None      # Raw high-res camera frame
+_latest_jpeg: bytes = b""                      # JPEG-encoded display frame
+_latest_telemetry: dict = {}                   # Last inference result
+_camera_fps: float = 0.0                       # Camera capture FPS
+_running: bool = True                          # Shutdown flag
 
 
-def _pipeline_thread(pipeline):
-    """Run the surveillance pipeline in a background thread, updating globals."""
-    global _latest_jpeg, _latest_telemetry
-    for raw_frame, hud_frame, telemetry in pipeline.run_generator():
-        _, buf = cv2.imencode(".jpg", hud_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+# ---------------------------------------------------------------------------
+# Thread 1: Camera capture at native resolution
+# ---------------------------------------------------------------------------
+def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
+    """Continuously read frames from the camera and store the latest one."""
+    global _latest_frame, _latest_jpeg, _camera_fps, _running
+
+    if isinstance(source, str) and source.isdigit():
+        source = int(source)
+
+    cap = (
+        cv2.VideoCapture(source, cv2.CAP_DSHOW)
+        if isinstance(source, int) and sys.platform == "win32"
+        else cv2.VideoCapture(source)
+    )
+
+    if isinstance(source, int):
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+
+    if not cap.isOpened():
+        logger.error("Cannot open camera source: %s", source)
+        _running = False
+        return
+
+    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    logger.info("Camera opened: %dx%d", actual_w, actual_h)
+
+    fps_times = []
+    try:
+        while _running:
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(0.01)
+                continue
+
+            if selfie:
+                frame = cv2.flip(frame, 1)
+
+            # Track camera FPS
+            now = time.perf_counter()
+            fps_times.append(now)
+            if len(fps_times) > 60:
+                fps_times = fps_times[-60:]
+            if len(fps_times) > 1:
+                _camera_fps = (len(fps_times) - 1) / (fps_times[-1] - fps_times[0])
+
+            # Encode JPEG for MJPEG streaming (this is very fast)
+            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+            with _lock:
+                _latest_frame = frame
+                _latest_jpeg = buf.tobytes()
+    finally:
+        cap.release()
+        logger.info("Camera thread stopped.")
+
+
+# ---------------------------------------------------------------------------
+# Thread 2: AI inference on downscaled frames
+# ---------------------------------------------------------------------------
+_AI_WIDTH = 640
+_AI_HEIGHT = 480
+
+
+def _inference_thread(pipeline):
+    """Grab latest camera frame, downscale, run AI, store telemetry."""
+    global _latest_telemetry, _running
+
+    while _running:
         with _lock:
-            _latest_jpeg = buf.tobytes()
-            _latest_telemetry = telemetry
+            frame = _latest_frame
+
+        if frame is None:
+            time.sleep(0.01)
+            continue
+
+        # Downscale to the resolution the AI models expect
+        h, w = frame.shape[:2]
+        if w != _AI_WIDTH or h != _AI_HEIGHT:
+            small = cv2.resize(frame, (_AI_WIDTH, _AI_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        else:
+            small = frame
+
+        try:
+            telemetry = pipeline.process_frame(small)
+            with _lock:
+                _latest_telemetry = telemetry
+        except Exception:
+            logger.exception("Inference error")
+            time.sleep(0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +712,8 @@ def telemetry_feed():
             with _lock:
                 data = _latest_telemetry.copy() if _latest_telemetry else None
             if data:
+                # Inject the camera FPS so the dashboard shows the display rate
+                data["camera_fps"] = round(_camera_fps, 1)
                 yield f"data: {json.dumps(data)}\n\n"
             time.sleep(0.1)  # 10 Hz telemetry
     return Response(gen(), mimetype="text/event-stream",
@@ -613,6 +724,8 @@ def telemetry_feed():
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    global _running
+
     parser = argparse.ArgumentParser(description="DMS Web Dashboard")
     parser.add_argument("--config", default="config/config.yaml")
     parser.add_argument("--yolo-config", default="config/yolo_config.yaml")
@@ -626,6 +739,10 @@ def main():
     parser.add_argument("--hef", default=None)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--res-w", type=int, default=1280,
+                        help="Camera display resolution width (default 1280)")
+    parser.add_argument("--res-h", type=int, default=720,
+                        help="Camera display resolution height (default 720)")
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
@@ -657,7 +774,6 @@ def main():
             logger.error("%s model not found: %s", label, p)
             sys.exit(1)
 
-    source = int(args.source) if args.source.isdigit() else args.source
     hef_path = Path(args.hef) if args.hef else None
 
     # Dynamically import the pipeline class from 09_surveillance_custom.py
@@ -669,15 +785,19 @@ def main():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
+    # Create pipeline in EXTERNAL-CAPTURE mode (source=None)
+    # The AI processes at 640x480 regardless of camera resolution
     pipeline = mod.SurveillancePipeline(
         onnx_path=onnx_path, mediapipe_model_path=mp_model,
         yolo_cfg=yolo_cfg, events_cfg=events_cfg,
         clips_cfg=clips_cfg, logging_cfg=logging_cfg,
-        dms_cfg=dms_cfg, source=source,
+        dms_cfg=dms_cfg, source=None,
         seq_len=args.seq_len, display=False,
         project_root=_PROJECT_ROOT,
         backend=args.backend,
         hef_path=hef_path,
+        frame_w=_AI_WIDTH,
+        frame_h=_AI_HEIGHT,
     )
 
     fc_path = models_dir / "feature_config.json"
@@ -691,19 +811,39 @@ def main():
             )
 
     logger.info("=" * 60)
-    logger.info("DMS WEB DASHBOARD")
-    logger.info("  Source:    %s", args.source)
-    logger.info("  Selfie:    %s", selfie)
-    logger.info("  Backend:   %s", args.backend)
-    logger.info("  Dashboard: http://%s:%d", args.host, args.port)
+    logger.info("DMS WEB DASHBOARD (Decoupled Architecture)")
+    logger.info("  Source:        %s", args.source)
+    logger.info("  Display res:   %dx%d", args.res_w, args.res_h)
+    logger.info("  AI res:        %dx%d", _AI_WIDTH, _AI_HEIGHT)
+    logger.info("  Selfie:        %s", selfie)
+    logger.info("  Backend:       %s", args.backend)
+    logger.info("  Dashboard:     http://%s:%d", args.host, args.port)
     logger.info("=" * 60)
 
-    # Start pipeline in background thread
-    t = threading.Thread(target=_pipeline_thread, args=(pipeline,), daemon=True)
-    t.start()
+    # Start camera thread (reads at display resolution, ~30fps)
+    t_cam = threading.Thread(
+        target=_camera_thread,
+        args=(args.source, selfie, args.res_w, args.res_h),
+        daemon=True,
+    )
+    t_cam.start()
 
-    # Start Flask
-    app.run(host=args.host, port=args.port, threaded=True, use_reloader=False)
+    # Start inference thread (processes at 640x480, whatever speed the CPU allows)
+    t_inf = threading.Thread(
+        target=_inference_thread,
+        args=(pipeline,),
+        daemon=True,
+    )
+    t_inf.start()
+
+    # Start Flask (blocking)
+    try:
+        app.run(host=args.host, port=args.port, threaded=True, use_reloader=False)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _running = False
+        logger.info("Shutting down.")
 
 
 if __name__ == "__main__":

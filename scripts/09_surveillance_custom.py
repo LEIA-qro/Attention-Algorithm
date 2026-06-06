@@ -208,12 +208,14 @@ class SurveillancePipeline:
         clips_cfg: Dict[str, Any],
         logging_cfg: Dict[str, Any],
         dms_cfg: Dict[str, Any],
-        source,
+        source=None,
         seq_len: int = 90,
         display: bool = True,
         project_root: Path = _PROJECT_ROOT,
         backend: str = "cpu",
         hef_path: Optional[Path] = None,
+        frame_w: int = 640,
+        frame_h: int = 480,
     ) -> None:
         self._display = display
         self._seq_len = seq_len
@@ -246,25 +248,30 @@ class SurveillancePipeline:
                 model_path=str(mediapipe_model_path), fps=fps_hint, cfg=feature_cfg
             )
 
-            if isinstance(source, str) and source.isdigit():
-                source = int(source)
+            # ---------- Camera setup (optional) ----------
+            self._cap = None
             self._source = source
-            self._cap = (
-                cv2.VideoCapture(source, cv2.CAP_DSHOW)
-                if isinstance(source, int) and sys.platform == "win32"
-                else cv2.VideoCapture(source)
-            )
-            if isinstance(source, int):
-                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-            if self._cap.isOpened():
+            if source is not None:
+                if isinstance(source, str) and source.isdigit():
+                    source = int(source)
+                self._source = source
+                self._cap = (
+                    cv2.VideoCapture(source, cv2.CAP_DSHOW)
+                    if isinstance(source, int) and sys.platform == "win32"
+                    else cv2.VideoCapture(source)
+                )
+                if not self._cap.isOpened():
+                    raise RuntimeError(f"Cannot open source: {source}")
                 self._frame_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 self._frame_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 actual_fps = self._cap.get(cv2.CAP_PROP_FPS)
                 self._fps: float = actual_fps if actual_fps > 0 else fps_hint
             else:
-                raise RuntimeError(f"Cannot open source: {source}")
+                # External-capture mode: caller provides frames via process_frame()
+                self._frame_w = frame_w
+                self._frame_h = frame_h
+                self._fps: float = fps_hint
+                logger.info("External-capture mode: %dx%d", frame_w, frame_h)
 
             self._tracker = CustomDriverTracker(yolo_cfg, self._frame_w, self._frame_h)
             self._engine = EventEngine(events_cfg, fps=self._fps)
@@ -334,12 +341,276 @@ class SurveillancePipeline:
         std[std < 1e-8] = 1.0
         self._norm_std = std
 
+    def process_frame(self, raw_frame: np.ndarray, timestamp_ms: int = None) -> dict:
+        """Run the full AI pipeline on a single frame and return telemetry.
+
+        This is the core method used by external capture mode (web dashboard).
+        The caller owns the camera; this method only does inference and state
+        updates.  It is NOT thread-safe — call it from a single thread.
+
+        Returns a telemetry dict (same schema as run_generator).
+        """
+        if timestamp_ms is None:
+            timestamp_ms = int(time.time() * 1000)
+        timestamp_s = timestamp_ms / 1000.0
+
+        self._frame_count += 1
+
+        self._fps_times.append(time.perf_counter())
+        current_fps = 0.0
+        if len(self._fps_times) > 1:
+            dt = self._fps_times[-1] - self._fps_times[0]
+            current_fps = (len(self._fps_times) - 1) / dt if dt > 0 else 0
+        if current_fps <= 0.0:
+            current_fps = self._fps
+
+        # Stage 1: person detection + driver isolation
+        redetect_every = self._yolo_cfg.get("redetect_every_n_frames", 30)
+        should_run_yolo_person = (
+            self._tracker._tracked_box is None
+            or (self._frame_count % redetect_every == 0)
+        )
+
+        if should_run_yolo_person:
+            if self._backend == "hailo":
+                person_boxes = detect_persons_hailo(
+                    self._yolo, raw_frame,
+                    conf_thresh=self._yolo_cfg.get("person_conf_thresh", 0.50),
+                    person_class_id=self._yolo_cfg.get("person_class_id", 0),
+                    imgsz=self._yolo_cfg.get("person_imgsz", 256),
+                )
+            else:
+                person_boxes = detect_persons(
+                    self._yolo, raw_frame,
+                    conf_thresh=self._yolo_cfg.get("person_conf_thresh", 0.50),
+                    person_class_id=self._yolo_cfg.get("person_class_id", 0),
+                    device=self._yolo_cfg.get("device", None),
+                    imgsz=self._yolo_cfg.get("person_imgsz", self._yolo_cfg.get("imgsz", 320)),
+                )
+            driver_box = self._tracker.update(person_boxes, self._frame_count)
+        else:
+            driver_box = self._tracker._tracked_box
+
+        self._current_driver_box = driver_box
+
+        # Stage 2: MediaPipe + DriverStateNet
+        if driver_box is None:
+            self._driver_missing_frames += 1
+            if self._driver_missing_frames > 15:
+                self._current_object_scores = {}
+                self._current_detected_objects = []
+                self._current_state = "Alert"
+                self._current_probs = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+                self._feature_buffer.clear()
+                self._current_feats = {}
+        else:
+            self._driver_missing_frames = 0
+
+        probs = self._current_probs
+        feats = self._current_feats
+        if driver_box is not None:
+            padded = pad_box(driver_box,
+                             self._yolo_cfg.get("roi_padding_px", 30),
+                             self._frame_w, self._frame_h)
+            x1, y1, x2, y2 = [int(v) for v in padded]
+            roi = raw_frame[y1:y2, x1:x2]
+            if roi.size > 0:
+                preprocessed = preprocess_frame(roi)
+                
+                if self._frame_count % self._extractor_skip == 0 or not self._current_feats:
+                    feats = self._extractor.extract(preprocessed, timestamp_ms)
+                    self._current_feats = feats
+                else:
+                    feats = self._current_feats
+                    
+                if feats and "ear_avg" in feats:
+                    feats["gaze_yaw"] = -88.45
+                    feats["eyes_off_road_pct"] = 0.98
+                    
+                    feat_vec = np.array(
+                        [feats.get(n, 0.0) for n in FEATURE_NAMES], dtype=np.float32
+                    )
+                    
+                    insert_count = max(1, int(round(self._fps / max(1.0, current_fps))))
+                    for _ in range(insert_count):
+                        self._feature_buffer.append(feat_vec)
+                        
+                    if (len(self._feature_buffer) >= self._seq_len
+                            and self._frame_count % 5 == 0):
+                        buf = np.stack(list(self._feature_buffer), axis=0)
+                        if self._norm_mean is not None:
+                            buf = (buf - self._norm_mean) / self._norm_std
+                        probs = self._onnx.predict_proba(buf[np.newaxis])[0]
+                        self._current_state = LABEL_NAMES[int(np.argmax(probs))]
+                        self._current_probs = probs
+
+        # Stage 3: object detection in driver ROI
+        if driver_box is not None and self._frame_count % 5 == 0:
+            if self._backend == "hailo":
+                self._current_object_scores, self._current_detected_objects = (
+                    detect_objects_in_roi_hailo(self._yolo, raw_frame, driver_box, self._yolo_cfg)
+                )
+            else:
+                self._current_object_scores, self._current_detected_objects = (
+                    detect_objects_in_roi(self._yolo, raw_frame, driver_box, self._yolo_cfg)
+                )
+        object_scores = self._current_object_scores
+        detected_objects = self._current_detected_objects
+
+        # --- Heuristic Overrides ---
+        if driver_box is not None and feats:
+            phys_yaw = feats.get("pitch", 0.0) - self._baseline_yaw
+            phys_pitch = feats.get("roll", 0.0) - self._baseline_pitch
+            gaze_pitch = feats.get("gaze_pitch", 0.0)
+            ear = feats.get("ear_avg", 1.0)
+            
+            head_distracted = False
+            if abs(phys_yaw) > 25.0:
+                head_distracted = True
+            elif abs(phys_pitch) > 20.0 or abs(gaze_pitch) > 35.0:
+                head_distracted = True
+                
+            trigger_frames = int(0.3 * current_fps)
+            cap_frames = int(1.0 * current_fps)
+                
+            if head_distracted:
+                self._distracted_frames = min(cap_frames, self._distracted_frames + 1)
+            else:
+                self._distracted_frames = max(0, self._distracted_frames - 3)
+                
+            eyes_closed_or_off = (feats.get("ear_avg", 1.0) < 0.22)
+            if eyes_closed_or_off:
+                self._eyes_closed_frames += 1
+            else:
+                self._eyes_closed_frames = max(0, self._eyes_closed_frames - 3)
+                
+            is_distracted_heuristic = (
+                self._distracted_frames > trigger_frames or 
+                object_scores.get("phone", 0.0) > 0.45 or 
+                object_scores.get("danger", 0.0) > 0.45 or
+                self._eyes_closed_frames > 2.0 * current_fps
+            )
+            
+            is_drowsy_heuristic = (
+                feats.get("perclos", 0.0) > 0.4 or 
+                feats.get("mar", 0.0) > 0.45 or
+                self._eyes_closed_frames > 0.2 * current_fps
+            )
+            
+            is_alert_heuristic = (
+                not head_distracted and
+                not eyes_closed_or_off and
+                feats.get("mar", 0.0) < 0.3 and
+                abs(phys_yaw) < 20.0 and
+                abs(phys_pitch) < 20.0
+            )
+                
+            if is_distracted_heuristic:
+                self._current_state = "Distracted"
+                self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
+                self._was_heuristic_distracted = True
+            elif self._was_heuristic_distracted:
+                self._was_heuristic_distracted = False
+                if len(self._feature_buffer) > 0:
+                    self._feature_buffer.extend([self._feature_buffer[-1]] * self._seq_len)
+                self._current_state = "Alert"
+                self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
+                
+            elif is_drowsy_heuristic:
+                self._current_state = "Drowsy"
+                self._current_probs = np.array([0.05, 0.90, 0.05], dtype=np.float32)
+                self._was_heuristic_drowsy = True
+            elif self._was_heuristic_drowsy:
+                self._was_heuristic_drowsy = False
+                if len(self._feature_buffer) > 0:
+                    self._feature_buffer.extend([self._feature_buffer[-1]] * self._seq_len)
+                self._current_state = "Alert"
+                self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
+                
+            elif is_alert_heuristic:
+                self._current_state = "Alert"
+                self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
+
+        # Stage 4: event engine
+        signal = SignalFrame(
+            phone=object_scores.get("phone", 0.0),
+            food=object_scores.get("food", 0.0),
+            danger=object_scores.get("danger", 0.0),
+            drowsy_prob=float(probs[1]) if probs is not None else 0.0,
+            distracted_prob=float(probs[2]),
+            alert_prob=float(probs[0]),
+            eyes_off_road_pct=feats.get("eyes_off_road_pct", 0.0) if feats else 0.0,
+            timestamp_s=timestamp_s,
+        )
+        triggers = self._engine.update(signal)
+
+        # Build a lightweight HUD frame for clip recording
+        hud_frame = _draw_hud(
+            frame=raw_frame,
+            driver_box=driver_box,
+            state=self._current_state,
+            probs=self._current_probs,
+            object_scores=object_scores,
+            recent_events=[evt for evt, t in self._recent_saved if timestamp_s - t < 3.0],
+            fps=current_fps,
+            buffering_pct=len(self._feature_buffer) / self._seq_len,
+            show_help=False,
+            detected_objects=detected_objects,
+            feats=feats,
+            full_hud=True,
+        )
+
+        # Push to clip ring buffer
+        self._clip_writer.push_frame(hud_frame, timestamp_s)
+        self._handle_post_collection(hud_frame, timestamp_s)
+
+        post_needed = int(self._clip_writer._post_s * self._fps)
+        for trigger in triggers:
+            evt = trigger["event_type"]
+            if evt not in self._collecting_post:
+                pre_frames = [f.copy() for f, _ in self._clip_writer._ring_buffer]
+                self._collecting_post[evt] = {
+                    "pre_frames": pre_frames,
+                    "frames": [],
+                    "remaining": post_needed,
+                    "trigger": trigger
+                }
+
+        # Build telemetry dict
+        telemetry = {
+            "state": self._current_state,
+            "probs": {
+                "alert": float(self._current_probs[0]),
+                "drowsy": float(self._current_probs[1]),
+                "distracted": float(self._current_probs[2]),
+            },
+            "fps": round(current_fps, 1),
+            "objects": {k: round(v, 2) for k, v in object_scores.items() if v > 0},
+            "feats": {
+                "yaw": round(feats.get("pitch", 0), 1) if feats else 0,
+                "pitch": round(feats.get("roll", 0), 1) if feats else 0,
+                "ear": round(feats.get("ear_avg", 0), 2) if feats else 0,
+                "mar": round(feats.get("mar", 0), 2) if feats else 0,
+                "perclos": round(feats.get("perclos", 0), 2) if feats else 0,
+            },
+            "events": [evt for evt, t in self._recent_saved if timestamp_s - t < 3.0],
+            "triggers": [t["event_type"] for t in triggers],
+            "frame_count": self._frame_count,
+            "driver_box": [int(v) for v in driver_box] if driver_box is not None else None,
+            "detected_objects": detected_objects,
+        }
+
+        return telemetry
+
     def run_generator(self):
         """Yield (raw_frame, hud_frame, telemetry_dict) per frame.
 
-        This is the core processing loop, decoupled from any display layer.
-        Consumers (cv2.imshow, Flask MJPEG, etc.) iterate over this generator.
+        Uses the internal VideoCapture.  For external-capture mode, use
+        process_frame() directly instead.
         """
+        if self._cap is None:
+            raise RuntimeError("run_generator() requires a video source. "
+                               "Use process_frame() for external-capture mode.")
         consecutive_failures = 0
         while True:
             ret, raw_frame = self._cap.read()
@@ -360,264 +631,22 @@ class SurveillancePipeline:
                     continue
 
             consecutive_failures = 0
-            self._frame_count += 1
-            timestamp_ms = int(time.time() * 1000)
-            timestamp_s = timestamp_ms / 1000.0
-
-            self._fps_times.append(time.perf_counter())
-            current_fps = 0.0
-            if len(self._fps_times) > 1:
-                dt = self._fps_times[-1] - self._fps_times[0]
-                current_fps = (len(self._fps_times) - 1) / dt if dt > 0 else 0
-            if current_fps <= 0.0:
-                current_fps = self._fps
-
-            # Stage 1: person detection + driver isolation (optimize YOLO call frequency)
-            redetect_every = self._yolo_cfg.get("redetect_every_n_frames", 30)
-            should_run_yolo_person = (
-                self._tracker._tracked_box is None
-                or (self._frame_count % redetect_every == 0)
-            )
-
-            if should_run_yolo_person:
-                if self._backend == "hailo":
-                    person_boxes = detect_persons_hailo(
-                        self._yolo, raw_frame,
-                        conf_thresh=self._yolo_cfg.get("person_conf_thresh", 0.50),
-                        person_class_id=self._yolo_cfg.get("person_class_id", 0),
-                        imgsz=self._yolo_cfg.get("person_imgsz", 256),
-                    )
-                else:
-                    person_boxes = detect_persons(
-                        self._yolo, raw_frame,
-                        conf_thresh=self._yolo_cfg.get("person_conf_thresh", 0.50),
-                        person_class_id=self._yolo_cfg.get("person_class_id", 0),
-                        device=self._yolo_cfg.get("device", None),
-                        imgsz=self._yolo_cfg.get("person_imgsz", self._yolo_cfg.get("imgsz", 320)),
-                    )
-                driver_box = self._tracker.update(person_boxes, self._frame_count)
-            else:
-                driver_box = self._tracker._tracked_box
-
-            self._current_driver_box = driver_box
-
-            # Stage 2: MediaPipe + DriverStateNet (optimize CPU by skipping MediaPipe extraction)
-            if driver_box is None:
-                self._driver_missing_frames += 1
-                if self._driver_missing_frames > 15:
-                    self._current_object_scores = {}
-                    self._current_detected_objects = []
-                    self._current_state = "Alert"
-                    self._current_probs = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-                    self._feature_buffer.clear()
-                    self._current_feats = {}
-            else:
-                self._driver_missing_frames = 0
-
-            probs = self._current_probs
-            feats = self._current_feats
-            if driver_box is not None:
-                padded = pad_box(driver_box,
-                                 self._yolo_cfg.get("roi_padding_px", 30),
-                                 self._frame_w, self._frame_h)
-                x1, y1, x2, y2 = [int(v) for v in padded]
-                roi = raw_frame[y1:y2, x1:x2]
-                if roi.size > 0:
-                    preprocessed = preprocess_frame(roi)
-                    
-                    # Only run MediaPipe FaceLandmarker once every self._extractor_skip frames, reuse otherwise
-                    if self._frame_count % self._extractor_skip == 0 or not self._current_feats:
-                        feats = self._extractor.extract(preprocessed, timestamp_ms)
-                        self._current_feats = feats
-                    else:
-                        feats = self._current_feats
-                        
-                    if feats and "ear_avg" in feats:
-                        # Clamp broken features to their training data means to prevent LSTM explosion
-                        feats["gaze_yaw"] = -88.45
-                        feats["eyes_off_road_pct"] = 0.98
-                        
-                        feat_vec = np.array(
-                            [feats.get(n, 0.0) for n in FEATURE_NAMES], dtype=np.float32
-                        )
-                        
-                        # Compensate for camera FPS being lower than training FPS (30.0)
-                        # by inserting the feature vector multiple times to prevent LSTM inertia
-                        insert_count = max(1, int(round(self._fps / max(1.0, current_fps))))
-                        for _ in range(insert_count):
-                            self._feature_buffer.append(feat_vec)
-                            
-                        if (len(self._feature_buffer) >= self._seq_len
-                                and self._frame_count % 5 == 0):
-                            buf = np.stack(list(self._feature_buffer), axis=0)
-                            if self._norm_mean is not None:
-                                buf = (buf - self._norm_mean) / self._norm_std
-                            probs = self._onnx.predict_proba(buf[np.newaxis])[0]
-                            self._current_state = LABEL_NAMES[int(np.argmax(probs))]
-                            self._current_probs = probs
-
-            # Stage 3: object detection in driver ROI (optimize frequency to run every 5 frames)
-            if driver_box is not None and self._frame_count % 5 == 0:
-                if self._backend == "hailo":
-                    self._current_object_scores, self._current_detected_objects = (
-                        detect_objects_in_roi_hailo(self._yolo, raw_frame, driver_box, self._yolo_cfg)
-                    )
-                else:
-                    self._current_object_scores, self._current_detected_objects = (
-                        detect_objects_in_roi(self._yolo, raw_frame, driver_box, self._yolo_cfg)
-                    )
-            object_scores = self._current_object_scores
-            detected_objects = self._current_detected_objects
-
-            # --- Heuristic Overrides ---
-            if driver_box is not None and feats:
-                phys_yaw = feats.get("pitch", 0.0) - self._baseline_yaw
-                phys_pitch = feats.get("roll", 0.0) - self._baseline_pitch
-                gaze_pitch = feats.get("gaze_pitch", 0.0)
-                ear = feats.get("ear_avg", 1.0)
-                
-                head_distracted = False
-                if abs(phys_yaw) > 25.0:
-                    head_distracted = True
-                elif abs(phys_pitch) > 20.0 or abs(gaze_pitch) > 35.0:
-                    head_distracted = True
-                    
-                trigger_frames = int(0.3 * current_fps)  # 0.3 seconds (very snappy)
-                cap_frames = int(1.0 * current_fps)  # max 1.0s
-                    
-                if head_distracted:
-                    self._distracted_frames = min(cap_frames, self._distracted_frames + 1)
-                else:
-                    # Drop 3x faster to return to normal instantly
-                    self._distracted_frames = max(0, self._distracted_frames - 3)
-                    
-                # Detect eyes closed (ignore eyes_off_road_pct since it's hard-clamped to 0.98)
-                eyes_closed_or_off = (feats.get("ear_avg", 1.0) < 0.22)
-                if eyes_closed_or_off:
-                    self._eyes_closed_frames += 1
-                else:
-                    self._eyes_closed_frames = max(0, self._eyes_closed_frames - 3)
-                    
-                is_distracted_heuristic = (
-                    self._distracted_frames > trigger_frames or 
-                    object_scores.get("phone", 0.0) > 0.45 or 
-                    object_scores.get("danger", 0.0) > 0.45 or
-                    self._eyes_closed_frames > 2.0 * current_fps  # Distracted takes priority after 2s of eyes closed
-                )
-                
-                is_drowsy_heuristic = (
-                    feats.get("perclos", 0.0) > 0.4 or 
-                    feats.get("mar", 0.0) > 0.45 or
-                    self._eyes_closed_frames > 0.2 * current_fps  # Drowsy triggers early for eyes closed
-                )
-                
-                is_alert_heuristic = (
-                    not head_distracted and
-                    not eyes_closed_or_off and
-                    feats.get("mar", 0.0) < 0.3 and
-                    abs(phys_yaw) < 20.0 and
-                    abs(phys_pitch) < 20.0
-                )
-                    
-                # Trigger Distracted if head sustained, or instantly for phone/danger
-                if is_distracted_heuristic:
-                    self._current_state = "Distracted"
-                    self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
-                    self._was_heuristic_distracted = True
-                elif self._was_heuristic_distracted:
-                    # Heuristic turned off. Flush the LSTM buffer to instantly remove "inertia".
-                    self._was_heuristic_distracted = False
-                    if len(self._feature_buffer) > 0:
-                        self._feature_buffer.extend([self._feature_buffer[-1]] * self._seq_len)
-                    self._current_state = "Alert"
-                    self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
-                    
-                # Trigger Drowsy if perclos is high, eyes currently closed, or yawning
-                elif is_drowsy_heuristic:
-                    self._current_state = "Drowsy"
-                    self._current_probs = np.array([0.05, 0.90, 0.05], dtype=np.float32)
-                    self._was_heuristic_drowsy = True
-                elif self._was_heuristic_drowsy:
-                    # Heuristic turned off. Flush the LSTM buffer to instantly remove "inertia".
-                    self._was_heuristic_drowsy = False
-                    if len(self._feature_buffer) > 0:
-                        self._feature_buffer.extend([self._feature_buffer[-1]] * self._seq_len)
-                    self._current_state = "Alert"
-                    self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
-                    
-                # Fix LSTM predicting Drowsy when user is clearly Alert
-                elif is_alert_heuristic:
-                    self._current_state = "Alert"
-                    self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
-
-            # Stage 4: event engine
-            signal = SignalFrame(
-                phone=object_scores.get("phone", 0.0),
-                food=object_scores.get("food", 0.0),
-                danger=object_scores.get("danger", 0.0),
-                drowsy_prob=float(probs[1]) if probs is not None else 0.0,
-                distracted_prob=float(probs[2]),
-                alert_prob=float(probs[0]),
-                eyes_off_road_pct=feats.get("eyes_off_road_pct", 0.0) if feats else 0.0,
-                timestamp_s=timestamp_s,
-            )
-            triggers = self._engine.update(signal)
+            telemetry = self.process_frame(raw_frame)
 
             hud_frame = _draw_hud(
                 frame=raw_frame,
-                driver_box=driver_box,
+                driver_box=self._current_driver_box,
                 state=self._current_state,
                 probs=self._current_probs,
-                object_scores=object_scores,
-                recent_events=[evt for evt, t in self._recent_saved if timestamp_s - t < 3.0],
-                fps=current_fps,
+                object_scores=self._current_object_scores,
+                recent_events=[evt for evt, _ in self._recent_saved],
+                fps=telemetry["fps"],
                 buffering_pct=len(self._feature_buffer) / self._seq_len,
                 show_help=self._show_help,
-                detected_objects=detected_objects,
-                feats=feats,
+                detected_objects=self._current_detected_objects,
+                feats=self._current_feats,
                 full_hud=self._display,
             )
-
-            # Push to clip ring buffer
-            self._clip_writer.push_frame(hud_frame, timestamp_s)
-
-            # Handle post-event collection
-            self._handle_post_collection(hud_frame, timestamp_s)
-
-            post_needed = int(self._clip_writer._post_s * self._fps)
-            for trigger in triggers:
-                evt = trigger["event_type"]
-                if evt not in self._collecting_post:
-                    # Contiguous Frame Deduplication: snapshot the current ring buffer frames
-                    pre_frames = [f.copy() for f, _ in self._clip_writer._ring_buffer]
-                    self._collecting_post[evt] = {
-                        "pre_frames": pre_frames,
-                        "frames": [],
-                        "remaining": post_needed,
-                        "trigger": trigger
-                    }
-
-            # Build telemetry dict for web consumers
-            telemetry = {
-                "state": self._current_state,
-                "probs": {
-                    "alert": float(self._current_probs[0]),
-                    "drowsy": float(self._current_probs[1]),
-                    "distracted": float(self._current_probs[2]),
-                },
-                "fps": round(current_fps, 1),
-                "objects": {k: round(v, 2) for k, v in object_scores.items() if v > 0},
-                "feats": {
-                    "yaw": round(feats.get("pitch", 0), 1) if feats else 0,
-                    "pitch": round(feats.get("roll", 0), 1) if feats else 0,
-                    "ear": round(feats.get("ear_avg", 0), 2) if feats else 0,
-                    "mar": round(feats.get("mar", 0), 2) if feats else 0,
-                    "perclos": round(feats.get("perclos", 0), 2) if feats else 0,
-                },
-                "events": [evt for evt, t in self._recent_saved if timestamp_s - t < 3.0],
-                "triggers": [t["event_type"] for t in triggers],
-                "frame_count": self._frame_count,
-            }
 
             yield raw_frame, hud_frame, telemetry
 
