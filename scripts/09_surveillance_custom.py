@@ -306,6 +306,11 @@ class SurveillancePipeline:
         self._fps_times: Deque[float] = deque(maxlen=60)
         self._recent_saved: Deque[str] = deque(maxlen=5)
         self._show_help: bool = False
+        
+        # Heuristic state overrides
+        self._baseline_yaw: float = 0.0
+        self._baseline_pitch: float = 0.0
+        self._distracted_frames: int = 0
 
     def set_normalisation_stats(self, mean: np.ndarray, std: np.ndarray) -> None:
         self._norm_mean = mean
@@ -427,6 +432,31 @@ class SurveillancePipeline:
                 object_scores = self._current_object_scores
                 detected_objects = self._current_detected_objects
 
+                # --- Heuristic Overrides ---
+                if driver_box is not None and feats:
+                    phys_yaw = feats.get("pitch", 0.0) - self._baseline_yaw
+                    phys_pitch = feats.get("roll", 0.0) - self._baseline_pitch
+                    gaze_pitch = feats.get("gaze_pitch", 0.0)
+                    ear = feats.get("ear_avg", 1.0)
+                    
+                    heuristic_distracted = False
+                    if abs(phys_yaw) > 30.0:
+                        heuristic_distracted = True
+                    elif abs(phys_pitch) > 25.0 or abs(gaze_pitch) > 40.0 or (ear < 0.35 and abs(phys_yaw) < 15.0):
+                        heuristic_distracted = True
+                    elif object_scores.get("phone", 0.0) > 0.5 or object_scores.get("danger", 0.0) > 0.5:
+                        heuristic_distracted = True
+                        
+                    if heuristic_distracted:
+                        self._distracted_frames += 1
+                    else:
+                        self._distracted_frames = max(0, self._distracted_frames - 1)
+                        
+                    # Trigger if sustained for 1.5 seconds (45 frames) or instantly for phone
+                    if self._distracted_frames > 45 or object_scores.get("phone", 0.0) > 0.5:
+                        self._current_state = "Distracted"
+                        self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
+
                 # Stage 4: event engine
                 signal = SignalFrame(
                     phone=object_scores.get("phone", 0.0),
@@ -489,6 +519,13 @@ class SurveillancePipeline:
                         break
                     elif key == ord("r"):
                         self._reset()
+                    elif key == ord("c"):
+                        logger.info("Recalibrating baseline pose...")
+                        if hasattr(self._extractor, "_calibration") and self._extractor._calibration:
+                            self._extractor._calibration.reset()
+                        if self._current_feats:
+                            self._baseline_yaw = self._current_feats.get("pitch", 0.0)
+                            self._baseline_pitch = self._current_feats.get("roll", 0.0)
                     elif key == ord("h"):
                         self._show_help = not self._show_help
 
