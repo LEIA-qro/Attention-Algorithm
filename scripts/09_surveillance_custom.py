@@ -489,8 +489,8 @@ class SurveillancePipeline:
                         # Drop 3x faster to return to normal instantly
                         self._distracted_frames = max(0, self._distracted_frames - 3)
                         
-                    # Fix inconsistency by combining ear_avg and eyes_off_road_pct
-                    eyes_closed_or_off = (feats.get("ear_avg", 1.0) < 0.22 or feats.get("eyes_off_road_pct", 0.0) > 0.6)
+                    # Detect eyes closed (ignore eyes_off_road_pct since it's hard-clamped to 0.98)
+                    eyes_closed_or_off = (feats.get("ear_avg", 1.0) < 0.22)
                     if eyes_closed_or_off:
                         self._eyes_closed_frames += 1
                     else:
