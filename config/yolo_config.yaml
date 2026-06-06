@@ -2,7 +2,9 @@
 # YOLOv8n configuration for the surveillance pipeline.
 
 yolo:
-  model_path: "yolov8s.pt"
+  # --- AI Models ---
+  # yolov8n.pt (Nano) generalized better for the phone and cup in this environment
+  model_path: "yolov8n.pt"
   device: "cuda"
 
   # --- Person detection (Layer 1) ---
