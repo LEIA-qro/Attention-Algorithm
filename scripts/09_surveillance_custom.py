@@ -314,6 +314,8 @@ class SurveillancePipeline:
         self._collecting_post: Dict[str, Dict[str, Any]] = {}
         self._fps_times: Deque[float] = deque(maxlen=60)
         self._recent_saved: Deque[Tuple[str, float]] = deque(maxlen=5)
+        self._was_heuristic_distracted: bool = False
+        self._was_heuristic_drowsy: bool = False
         self._driver_missing_frames: int = 0
         self._show_help: bool = False
         
@@ -483,19 +485,46 @@ class SurveillancePipeline:
                     if head_distracted:
                         self._distracted_frames = min(cap_frames, self._distracted_frames + 1)
                     else:
-                        self._distracted_frames = max(0, self._distracted_frames - 1)
+                        # Drop 3x faster to return to normal instantly
+                        self._distracted_frames = max(0, self._distracted_frames - 3)
                         
-                    # Trigger Distracted if head sustained for 1.5s, or instantly for phone/danger
-                    if self._distracted_frames > trigger_frames or \
-                       object_scores.get("phone", 0.0) > 0.45 or \
-                       object_scores.get("danger", 0.0) > 0.45:
+                    is_distracted_heuristic = (
+                        self._distracted_frames > trigger_frames or 
+                        object_scores.get("phone", 0.0) > 0.45 or 
+                        object_scores.get("danger", 0.0) > 0.45
+                    )
+                    
+                    is_drowsy_heuristic = (
+                        feats.get("perclos", 0.0) > 0.4 or 
+                        feats.get("ear_avg", 1.0) < 0.2 or 
+                        feats.get("mar", 0.0) > 0.45
+                    )
+                        
+                    # Trigger Distracted if head sustained, or instantly for phone/danger
+                    if is_distracted_heuristic:
                         self._current_state = "Distracted"
                         self._current_probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
+                        self._was_heuristic_distracted = True
+                    elif self._was_heuristic_distracted:
+                        # Heuristic turned off. Flush the LSTM buffer to instantly remove "inertia".
+                        self._was_heuristic_distracted = False
+                        if len(self._feature_buffer) > 0:
+                            self._feature_buffer.extend([self._feature_buffer[-1]] * self._seq_len)
+                        self._current_state = "Alert"
+                        self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
                         
                     # Trigger Drowsy if perclos is high, eyes currently closed, or yawning
-                    elif feats.get("perclos", 0.0) > 0.4 or feats.get("ear_avg", 1.0) < 0.2 or feats.get("mar", 0.0) > 0.45:
+                    elif is_drowsy_heuristic:
                         self._current_state = "Drowsy"
                         self._current_probs = np.array([0.05, 0.90, 0.05], dtype=np.float32)
+                        self._was_heuristic_drowsy = True
+                    elif self._was_heuristic_drowsy:
+                        # Heuristic turned off. Flush the LSTM buffer to instantly remove "inertia".
+                        self._was_heuristic_drowsy = False
+                        if len(self._feature_buffer) > 0:
+                            self._feature_buffer.extend([self._feature_buffer[-1]] * self._seq_len)
+                        self._current_state = "Alert"
+                        self._current_probs = np.array([0.90, 0.05, 0.05], dtype=np.float32)
 
                 # Stage 4: event engine
                 signal = SignalFrame(
