@@ -124,6 +124,7 @@ def _draw_hud(
     show_help: bool,
     detected_objects: List[Dict[str, Any]] = None,
     feats: Dict[str, float] = None,
+    full_hud: bool = True,
 ) -> np.ndarray:
     out = frame.copy()
     h, w = out.shape[:2]
@@ -147,51 +148,50 @@ def _draw_hud(
             cv2.putText(out, f"{label.upper()} {conf:.0%}", (ox1, max(oy1 - 5, 0)),
                         small, 1.2, color, 1)
 
-    col = LABEL_COLOURS.get(state, (200, 200, 200))
-    ov = out.copy()
-    cv2.rectangle(ov, (10, 10), (290, 70), col, -1)
-    cv2.addWeighted(ov, 0.55, out, 0.45, 0, out)
-    cv2.rectangle(out, (10, 10), (290, 70), col, 2)
-    cv2.putText(out, state.upper(), (25, 55), font, 1.2, (255, 255, 255), 2)
-    cv2.putText(out, f"{float(probs.max()):.0%}", (210, 55), font, 0.9, (255, 255, 255), 2)
+    if full_hud:
+        col = LABEL_COLOURS.get(state, (200, 200, 200))
+        ov = out.copy()
+        cv2.rectangle(ov, (10, 10), (290, 70), col, -1)
+        cv2.addWeighted(ov, 0.55, out, 0.45, 0, out)
+        cv2.rectangle(out, (10, 10), (290, 70), col, 2)
+        cv2.putText(out, state.upper(), (25, 55), font, 1.2, (255, 255, 255), 2)
+        cv2.putText(out, f"{float(probs.max()):.0%}", (210, 55), font, 0.9, (255, 255, 255), 2)
 
-    y_obj = 85
-    for evt, conf in object_scores.items():
-        if conf > 0.0:
-            cv2.putText(out, f"{evt}: {conf:.0%}", (15, y_obj), small, 1.2,
-                        EVENT_COLOURS.get(evt, (200, 200, 200)), 1)
-            y_obj += 18
+        y_obj = 85
+        for evt, conf in object_scores.items():
+            if conf > 0.0:
+                cv2.putText(out, f"{evt}: {conf:.0%}", (15, y_obj), small, 1.2,
+                            EVENT_COLOURS.get(evt, (200, 200, 200)), 1)
+                y_obj += 18
 
-    bar_x, bar_w = w - 250, 180
-    for i, (name, prob) in enumerate(zip(LABEL_NAMES, probs)):
-        y = 20 + i * 30
-        c = LABEL_COLOURS.get(name, (200, 200, 200))
-        cv2.putText(out, f"{name}:", (bar_x - 5, y + 14), small, 1.1, (220, 220, 220), 1)
-        cv2.rectangle(out, (bar_x + 80, y), (bar_x + 80 + bar_w, y + 18), (60, 60, 60), -1)
-        cv2.rectangle(out, (bar_x + 80, y), (bar_x + 80 + int(bar_w * prob), y + 18), c, -1)
-        cv2.putText(out, f"{prob:.0%}", (bar_x + 80 + bar_w + 5, y + 14), small, 1.0, (200, 200, 200), 1)
+        bar_x, bar_w = w - 250, 180
+        for i, (name, prob) in enumerate(zip(LABEL_NAMES, probs)):
+            y = 20 + i * 30
+            c = LABEL_COLOURS.get(name, (200, 200, 200))
+            cv2.putText(out, f"{name}:", (bar_x - 5, y + 14), small, 1.1, (220, 220, 220), 1)
+            cv2.rectangle(out, (bar_x + 80, y), (bar_x + 80 + bar_w, y + 18), (60, 60, 60), -1)
+            cv2.rectangle(out, (bar_x + 80, y), (bar_x + 80 + int(bar_w * prob), y + 18), c, -1)
+            cv2.putText(out, f"{prob:.0%}", (bar_x + 80 + bar_w + 5, y + 14), small, 1.0, (200, 200, 200), 1)
 
-    for i, evt in enumerate(recent_events):
-        cv2.putText(out, f"SAVED: {evt.upper()}", (10, h - 30 - i * 25),
-                    font, 0.65, EVENT_COLOURS.get(evt, (200, 200, 200)), 2)
+        for i, evt in enumerate(recent_events):
+            cv2.putText(out, f"SAVED: {evt.upper()}", (10, h - 30 - i * 25),
+                        font, 0.65, EVENT_COLOURS.get(evt, (200, 200, 200)), 2)
 
-    cv2.putText(out, f"FPS:{fps:.0f}", (w - 110, h - 10), small, 1.1, (140, 140, 140), 1)
-    
-    if feats:
-        debug_txt = f"YAW:{feats.get('pitch', 0):.0f} PITCH:{feats.get('roll', 0):.0f} EAR:{feats.get('ear_avg', 0):.2f} MAR:{feats.get('mar', 0):.2f}"
-        cv2.putText(out, debug_txt, (10, h - 10), small, 1.0, (0, 255, 255), 1)
+        cv2.putText(out, f"FPS:{fps:.0f}", (w - 110, h - 10), small, 1.1, (140, 140, 140), 1)
+        
+        if feats:
+            debug_txt = f"YAW:{feats.get('pitch', 0):.0f} PITCH:{feats.get('roll', 0):.0f} EAR:{feats.get('ear_avg', 0):.2f} MAR:{feats.get('mar', 0):.2f}"
+            cv2.putText(out, debug_txt, (10, h - 10), small, 1.0, (0, 255, 255), 1)
 
-    # Removed buffering text to avoid annoying the user
-
-    if show_help:
-        lines = ["Controls:", "  q - Quit", "  r - Reset state", "  h - Toggle help"]
-        ov2 = out.copy()
-        bx, by, bw, bh = w // 2 - 130, h // 2 - 60, 260, 110
-        cv2.rectangle(ov2, (bx, by), (bx + bw, by + bh), (40, 40, 40), -1)
-        cv2.addWeighted(ov2, 0.85, out, 0.15, 0, out)
-        cv2.rectangle(out, (bx, by), (bx + bw, by + bh), (100, 100, 100), 1)
-        for j, line in enumerate(lines):
-            cv2.putText(out, line, (bx + 12, by + 25 + j * 22), small, 1.1, (220, 220, 220), 1)
+        if show_help:
+            lines = ["Controls:", "  q - Quit", "  r - Reset state", "  h - Toggle help"]
+            ov2 = out.copy()
+            bx, by, bw, bh = w // 2 - 130, h // 2 - 60, 260, 110
+            cv2.rectangle(ov2, (bx, by), (bx + bw, by + bh), (40, 40, 40), -1)
+            cv2.addWeighted(ov2, 0.85, out, 0.15, 0, out)
+            cv2.rectangle(out, (bx, by), (bx + bw, by + bh), (100, 100, 100), 1)
+            for j, line in enumerate(lines):
+                cv2.putText(out, line, (bx + 12, by + 25 + j * 22), small, 1.1, (220, 220, 220), 1)
 
     return out
 
@@ -254,9 +254,9 @@ class SurveillancePipeline:
                 if isinstance(source, int) and sys.platform == "win32"
                 else cv2.VideoCapture(source)
             )
-            if isinstance(self._source, int):
-                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            if isinstance(source, int):
+                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
             if self._cap.isOpened():
                 self._frame_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -575,6 +575,7 @@ class SurveillancePipeline:
                 show_help=self._show_help,
                 detected_objects=detected_objects,
                 feats=feats,
+                full_hud=self._display,
             )
 
             # Push to clip ring buffer
