@@ -5,24 +5,24 @@
 
 # Project Paths
 paths:
-  project_root: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm"
-  data_root: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data"
-  raw_data: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw"
-  processed_data: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/processed"
-  features_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/features"
-  checkpoints_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/checkpoints"
-  logs_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/logs"
-  tensorboard_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/runs"
-  exports_dir: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/exports"
+  project_root: "."
+  data_root: "./data"
+  raw_data: "./data/raw"
+  processed_data: "./data/processed"
+  features_dir: "./data/features"
+  checkpoints_dir: "./checkpoints"
+  logs_dir: "./logs"
+  tensorboard_dir: "./runs"
+  exports_dir: "./exports"
 
   # Dataset paths
-  dmd_distraction: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/DMD-Distraction"
-  dmd_drowsiness: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/DMD-Drowsiness"
-  uta_rldd: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/UTA-RLDD"
-  auc_v2: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/data/raw/AUC-V2"
+  dmd_distraction: "./data/raw/DMD-Distraction"
+  dmd_drowsiness: "./data/raw/DMD-Drowsiness"
+  uta_rldd: "./data/raw/UTA-RLDD"
+  auc_v2: "./data/raw/AUC-V2"
 
   # MediaPipe model asset
-  mediapipe_model: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/models/face_landmarker_v2_with_blendshapes.task"
+  mediapipe_model: "./models/face_landmarker_v2_with_blendshapes.task"
 
 # MediaPipe Face Landmarker v2 Configuration
 mediapipe:
@@ -246,6 +246,6 @@ logging:
   level: "INFO"                      # DEBUG | INFO | WARNING | ERROR
   console: true
   file: true
-  log_file: "C:/Users/Diego Perea/Documents/Code/Attention-Algorithm/logs/training.log"
+  log_file: "./logs/training.log"
   tensorboard: true
   log_every_n_steps: 50
