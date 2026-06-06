@@ -478,9 +478,9 @@ class SurveillancePipeline:
             else:
                 self._distracted_frames = max(0, self._distracted_frames - 3)
                 
-            eyes_closed_or_off = (feats.get("ear_avg", 1.0) < 0.22)
+            eyes_closed_or_off = (feats.get("ear_avg", 1.0) < 0.26)
             if eyes_closed_or_off:
-                self._eyes_closed_frames += 1
+                self._eyes_closed_frames = min(cap_frames, self._eyes_closed_frames + 1)
             else:
                 self._eyes_closed_frames = max(0, self._eyes_closed_frames - 3)
                 
@@ -752,10 +752,12 @@ class SurveillancePipeline:
         self._collecting_post.clear()
 
     def calibrate(self) -> None:
-        logger.info("Recalibrating baseline pose...")
+        logger.info("Recalibrating baseline pose and EAR...")
         if self._current_feats:
             self._baseline_yaw = self._current_feats.get("pitch", 0.0)
             self._baseline_pitch = self._current_feats.get("roll", 0.0)
+        # Also reset the feature extractor so it recalibrates the EAR baseline for glasses
+        self._extractor.reset()
 
 
 def main() -> None:
