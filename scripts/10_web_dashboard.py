@@ -829,7 +829,7 @@ _AI_HEIGHT = 360
 
 
 def _inference_thread(pipeline):
-    """Grab latest camera frame, downscale, run AI, store telemetry."""
+    """Grab latest camera frame, run AI, store telemetry."""
     global _latest_telemetry, _running
 
     while _running:
@@ -840,15 +840,8 @@ def _inference_thread(pipeline):
             time.sleep(0.01)
             continue
 
-        # Downscale to the resolution the AI models expect
-        h, w = frame.shape[:2]
-        if w != _AI_WIDTH or h != _AI_HEIGHT:
-            small = cv2.resize(frame, (_AI_WIDTH, _AI_HEIGHT), interpolation=cv2.INTER_LINEAR)
-        else:
-            small = frame
-
         try:
-            telemetry = pipeline.process_frame(small)
+            telemetry = pipeline.process_frame(frame)
             with _lock:
                 _latest_telemetry = telemetry
         except Exception:
@@ -998,8 +991,8 @@ def main():
         project_root=_PROJECT_ROOT,
         backend=args.backend,
         hef_path=hef_path,
-        frame_w=_AI_WIDTH,
-        frame_h=_AI_HEIGHT,
+        frame_w=args.res_w,
+        frame_h=args.res_h,
     )
 
     fc_path = models_dir / "feature_config.json"

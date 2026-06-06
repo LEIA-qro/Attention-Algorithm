@@ -26,7 +26,7 @@ yolo:
   redetect_every_n_frames: 30
 
   # --- Object detection (Layer 3) ---
-  object_conf_thresh: 0.20
+  object_conf_thresh: 0.15
   roi_padding_px: 150
   imgsz: 640
   person_imgsz: 640
@@ -52,6 +52,8 @@ yolo:
     47: "food"
     76: "danger"
     43: "danger"
+    65: "phone"
+    73: "danger"
 
 events:
   sustain_seconds:
