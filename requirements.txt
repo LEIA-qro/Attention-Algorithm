@@ -13,6 +13,7 @@ torchvision>=0.16
 # --- Computer Vision & Face Analysis ---
 mediapipe>=0.10.9
 opencv-python>=4.8
+ultralytics>=8.0.0
 
 # --- Scientific Computing ---
 numpy>=1.24
@@ -32,11 +33,16 @@ tensorboard>=2.14
 
 # --- Model Export ---
 onnx>=1.15
+onnxruntime>=1.16.0
 onnxruntime-gpu>=1.16
 
 # --- Utilities ---
 tqdm>=4.66
 pyyaml>=6.0
 
+# --- Testing ---
+pytest>=7.0.0
+
 # --- Optional: Audio/Video playback for demos ---
 pygame>=2.5
+
