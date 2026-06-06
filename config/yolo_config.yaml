@@ -2,7 +2,7 @@
 # YOLOv8n configuration for the surveillance pipeline.
 
 yolo:
-  model_path: "yolov8n.pt"
+  model_path: "yolov8s.pt"
   device: "cuda"
 
   # --- Person detection (Layer 1) ---
