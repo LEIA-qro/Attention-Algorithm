@@ -46,3 +46,5 @@ pytest>=7.0.0
 # --- Optional: Audio/Video playback for demos ---
 pygame>=2.5
 
+# --- Web Dashboard ---
+Flask>=2.0
