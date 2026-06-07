@@ -568,7 +568,7 @@ body {
         $('topbar-dot').className = 'topbar-dot ' + cls;
 
         // FPS
-        $('topbar-fps').textContent = d.fps + ' FPS';
+        $('topbar-fps').textContent = (d.camera_fps || d.fps) + ' FPS';
 
         // Bars
         for (const key of ['alert', 'drowsy', 'distracted']) {

@@ -3,8 +3,8 @@
 
 yolo:
   # --- AI Models ---
-  # yolov8n.pt (Nano) — 3x faster than Small; 960x540 gives it enough detail
-  model_path: "yolov8n.pt"
+  # yolov8s.pt (Small) for better accuracy
+  model_path: "yolov8s.pt"
   device: "cuda"
 
   # --- Person detection (Layer 1) ---
