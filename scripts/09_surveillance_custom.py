@@ -318,7 +318,7 @@ class SurveillancePipeline:
         self._current_probs: np.ndarray = np.array([1.0, 0.0, 0.0], dtype=np.float32)
         self._current_object_scores: Dict[str, float] = {}
         self._current_detected_objects: List[Dict[str, Any]] = []
-        self._extractor_skip = feature_cfg.get("skip_frames", 2)
+        self._extractor_skip = feature_cfg.get("skip_frames", 3)
         self._current_feats: Dict[str, float] = {}
         self._current_driver_box: Optional[np.ndarray] = None
         # key=event_type → {"pre_frames": list, "frames": [], "remaining": int, "trigger": dict}
@@ -436,7 +436,7 @@ class SurveillancePipeline:
                         self._feature_buffer.append(feat_vec)
                         
                     if (len(self._feature_buffer) >= self._seq_len
-                            and self._frame_count % 5 == 0):
+                            and self._frame_count % 10 == 0):
                         buf = np.stack(list(self._feature_buffer), axis=0)
                         if self._norm_mean is not None:
                             buf = (buf - self._norm_mean) / self._norm_std
@@ -444,8 +444,8 @@ class SurveillancePipeline:
                         self._current_state = LABEL_NAMES[int(np.argmax(probs))]
                         self._current_probs = probs
 
-        # Stage 3: object detection in driver ROI
-        if self._frame_count % 5 == 0:
+        # Stage 3: object detection in driver ROI (every 10 frames to save CPU)
+        if self._frame_count % 10 == 0:
             if self._backend == "hailo":
                 self._current_object_scores, self._current_detected_objects = (
                     detect_objects_in_roi_hailo(self._yolo, raw_frame, driver_box, self._yolo_cfg)

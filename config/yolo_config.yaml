@@ -29,7 +29,7 @@ yolo:
   object_conf_thresh: 0.15
   roi_padding_px: 150
   imgsz: 640
-  person_imgsz: 640
+  person_imgsz: 320
 
   # COCO class IDs to detect
   object_classes:

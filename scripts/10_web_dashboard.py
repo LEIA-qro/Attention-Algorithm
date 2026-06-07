@@ -809,8 +809,8 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
             if len(fps_times) > 1:
                 _camera_fps = (len(fps_times) - 1) / (fps_times[-1] - fps_times[0])
 
-            # Encode JPEG for MJPEG streaming (this is very fast)
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            # Encode JPEG for MJPEG streaming (lower quality = faster encoding)
+            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
 
             with _lock:
                 _latest_frame = frame
@@ -832,6 +832,8 @@ def _inference_thread(pipeline):
     """Grab latest camera frame, moderately downscale, run AI, store telemetry."""
     global _latest_telemetry, _running
 
+    last_frame_id = None
+
     while _running:
         with _lock:
             frame = _latest_frame
@@ -839,6 +841,13 @@ def _inference_thread(pipeline):
         if frame is None:
             time.sleep(0.01)
             continue
+
+        # Skip if camera hasn't produced a new frame yet
+        fid = id(frame)
+        if fid == last_frame_id:
+            time.sleep(0.005)
+            continue
+        last_frame_id = fid
 
         # Moderate downscale: 960x540 keeps enough detail for YOLO while
         # being fast enough for MediaPipe (which runs every frame).
