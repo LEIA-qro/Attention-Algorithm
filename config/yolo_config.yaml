@@ -73,7 +73,7 @@ clips:
   pre_buffer_seconds: 3.0   # Reduced from 5.0 — saves ~165 MB RAM on Pi 5
   post_buffer_seconds: 5.0
   output_dir: "output/clips"
-  fourcc: "mp4v"
+  fourcc: "avc1"
 
 logging_out:
   output_dir: "output/logs"
