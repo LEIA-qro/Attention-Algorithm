@@ -1,0 +1,24 @@
+# secrets / entorno
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node / build del frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
+# logs / temporales
+*.log
+rpi_live_test.log
+
+# OS
+.DS_Store
+Thumbs.db

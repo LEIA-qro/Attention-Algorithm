@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0C0F" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      // Anti-flash: aplica el tema guardado antes del primer paint.
+      try {
+        var t = localStorage.getItem("dms-theme");
+        if (t === "light" || (!t && matchMedia("(prefers-color-scheme: light)").matches))
+          document.documentElement.classList.add("light");
+      } catch (e) {}
+    </script>
+    <meta name="description" content="DAVE — Driver Attention & Vision Evaluator: monitoreo de atención del conductor en tiempo real." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>DAVE · Driver Attention &amp; Vision Evaluator</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

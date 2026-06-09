@@ -1,0 +1,45 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./web/dist:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://dms:${DB_PASSWORD}@db:5432/dms"
+      S3_BUCKET: "dms-media-800407728644"
+      AWS_REGION: "us-east-1"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dms
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: dms
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dms"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:
