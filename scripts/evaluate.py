@@ -524,7 +524,7 @@ def main() -> None:
     logger.info("EVALUATION COMPLETE")
     logger.info("  All plots and metrics saved to: %s", eval_dir)
     logger.info("=" * 70)
-    logger.info("Next step: python scripts/05_export_onnx.py --config %s", args.config)
+    logger.info("Next step: python scripts/export_onnx.py --config %s", args.config)
 
 
 if __name__ == "__main__":

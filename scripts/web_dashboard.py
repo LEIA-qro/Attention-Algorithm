@@ -6,7 +6,7 @@ inference thread runs the pipeline on downscaled frames, and Flask serves an
 MJPEG /video_feed plus an SSE /telemetry_feed. The independent camera thread
 keeps the video stream from being bottlenecked by AI processing.
 
-Run with: python scripts/10_web_dashboard.py --source 0 --selfie
+Run with: python scripts/web_dashboard.py --source 0 --selfie
 """
 
 from __future__ import annotations
@@ -939,7 +939,7 @@ def main():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "surveillance_custom",
-        str(_PROJECT_ROOT / "scripts" / "09_surveillance_custom.py"),
+        str(_PROJECT_ROOT / "scripts" / "surveillance_custom.py"),
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

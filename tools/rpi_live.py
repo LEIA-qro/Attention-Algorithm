@@ -133,7 +133,7 @@ def build_pipeline(repo: Path, selfie: bool, fps: float):
     seq_len = int(fcfg["model"]["seq_len"])
 
     spec = importlib.util.spec_from_file_location(
-        "surveillance_custom", str(repo / "scripts" / "09_surveillance_custom.py")
+        "surveillance_custom", str(repo / "scripts" / "surveillance_custom.py")
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

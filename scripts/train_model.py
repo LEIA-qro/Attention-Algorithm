@@ -329,7 +329,7 @@ def main() -> None:
 
     for p in [train_csv, val_csv]:
         if not p.exists():
-            logger.error("split file not found: %s, run 02_build_splits.py first", p)
+            logger.error("split file not found: %s, run build_splits.py first", p)
             sys.exit(1)
 
     # Reproducibility
@@ -521,7 +521,7 @@ def main() -> None:
     logger.info("  Checkpoint:    %s", models_dir / "best_model.pt")
     logger.info("  TensorBoard:   tensorboard --logdir %s", tb_dir.parent)
     logger.info("=" * 70)
-    logger.info("Next step: python scripts/04_evaluate.py --config %s", args.config)
+    logger.info("Next step: python scripts/evaluate.py --config %s", args.config)
 
 
 if __name__ == "__main__":

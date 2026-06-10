@@ -3,10 +3,10 @@
 """Real-time driver monitoring demo: webcam -> features -> ONNX DriverStateNet, with an overlay HUD.
 
 Usage:
-    python scripts/06_inference_demo.py --config config/config.yaml
-    python scripts/06_inference_demo.py --onnx models/driver_state_net.onnx
-    python scripts/06_inference_demo.py --source 0
-    python scripts/06_inference_demo.py --source path/to/video.mp4
+    python scripts/inference_demo.py --config config/config.yaml
+    python scripts/inference_demo.py --onnx models/driver_state_net.onnx
+    python scripts/inference_demo.py --source 0
+    python scripts/inference_demo.py --source path/to/video.mp4
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def _load_config(path: str) -> Dict[str, Any]:
 
 
 def _load_feature_config(path: Path) -> Dict[str, Any]:
-    """Load feature_config.json produced by 05_export_onnx.py."""
+    """Load feature_config.json produced by export_onnx.py."""
     if not path.exists():
         logger.warning("feature_config.json not found at %s, using defaults", path)
         return {}
@@ -861,7 +861,7 @@ def main() -> None:
     # Check files exist
     if not onnx_path.exists():
         logger.error("ONNX model not found: %s", onnx_path)
-        logger.error("Run scripts/05_export_onnx.py first to export the model.")
+        logger.error("Run scripts/export_onnx.py first to export the model.")
         sys.exit(1)
     if not mp_model_path.exists():
         logger.error("MediaPipe model not found: %s", mp_model_path)

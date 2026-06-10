@@ -303,7 +303,7 @@ def main() -> None:
         logger.warning("onnx numerical validation failed, check the model export")
         sys.exit(1)
 
-    logger.info("Next step: python scripts/06_inference_demo.py --config %s", args.config)
+    logger.info("Next step: python scripts/inference_demo.py --config %s", args.config)
 
 
 if __name__ == "__main__":
