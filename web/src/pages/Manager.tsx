@@ -6,7 +6,7 @@ import { api, DEMO } from "@/lib/api";
 import { STATE_COLOR } from "@/lib/stateColors";
 import { SettingsButton } from "@/components/SettingsButton";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { pick, useLang, type Lang } from "@/lib/i18n";
+import { pick, useLang, type Lang } from "@/lib/prefs";
 import type { SessionListItem } from "@/lib/types";
 
 function fmt(ts: string, lang: Lang) {

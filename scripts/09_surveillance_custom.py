@@ -1,33 +1,18 @@
 #!/usr/bin/env python3
-"""
-09_surveillance_custom.py — Custom Driver Surveillance Pipeline with HUD overlays and deduplicated clip saving
-========================================================================================================
+"""Surveillance pipeline with HUD overlays and deduplicated clip saving.
 
-Full 4-layer pipeline with custom tracker (selfie mode support), custom feature extractor (robust face loss & absolute gaze),
-and custom clip writer (contiguous frame deduplication and HUD frame overlays on saved video clips).
+Like 08 but with the custom tracker (selfie mode), the reliable face-loss
+feature extractor, and the clip writer that dedupes contiguous frames and
+burns the HUD onto saved clips.
 
-Usage
------
     python scripts/09_surveillance_custom.py --source 0
     python scripts/09_surveillance_custom.py --source path/to/video.mp4 --no-display --selfie
-    python scripts/09_surveillance_custom.py --help
-
-Controls (display on)
-----------------------
-    q   Quit
-    r   Reset all state
-    h   Toggle help overlay
-
-Output
-------
-    output/clips/   — MP4 clips
-    output/logs/    — events_<timestamp>.csv and .json
 """
 
 from __future__ import annotations
 
 import os
-# Optimize CPU utilization by limiting threads for highly parallelised libraries
+# Cap thread counts before the heavy libs import, otherwise they grab every core.
 os.environ["OMP_NUM_THREADS"] = "2"
 os.environ["MKL_NUM_THREADS"] = "2"
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
@@ -81,22 +66,18 @@ def _load_yaml(path: str) -> Dict[str, Any]:
 def _setup_logging(level: str = "INFO") -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
-        format="[%(asctime)s] %(levelname)-8s %(name)s — %(message)s",
+        format="[%(asctime)s] %(levelname)-8s %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
 
 class OnnxInferenceSession:
-    """Thin ONNX Runtime wrapper for DriverStateNet.
-
-    Input:  "features"  shape (1, seq_len, 18) float32
-    Output: "logits"    shape (1, 3)            float32
-    """
+    """Thin ONNX Runtime wrapper for DriverStateNet."""
     def __init__(self, onnx_path: Path) -> None:
         import onnxruntime as ort
         if not onnx_path.exists():
             raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
-        # Force CPUExecutionProvider for ONNX Runtime to avoid cuDNN version conflicts with PyTorch/YOLOv8
+        # Pin to CPU so ONNX Runtime's cuDNN doesn't clash with PyTorch/YOLOv8.
         providers = ["CPUExecutionProvider"]
         self.session = ort.InferenceSession(str(onnx_path), providers=providers)
         self.input_name = self.session.get_inputs()[0].name
@@ -104,7 +85,7 @@ class OnnxInferenceSession:
         logger.info("ONNX loaded: %s  providers=%s", onnx_path, providers)
 
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
-        """features: (1, seq_len, 18) float32 → softmax probs (1, 3)."""
+        """features: (1, seq_len, 18) float32 -> softmax probs (1, 3)."""
         logits = self.session.run(
             [self.output_name], {self.input_name: features.astype(np.float32)}
         )[0]
@@ -137,7 +118,6 @@ def _draw_hud(
         cv2.rectangle(out, (x1, y1), (x2, y2), col, 2)
         cv2.putText(out, "DRIVER", (x1, max(y1 - 8, 0)), small, 1.2, col, 1)
 
-    # Highlight all detected YOLO objects in driver's ROI
     if detected_objects:
         for obj in detected_objects:
             ox1, oy1, ox2, oy2 = [int(v) for v in obj["box"]]
@@ -248,7 +228,7 @@ class SurveillancePipeline:
                 model_path=str(mediapipe_model_path), fps=fps_hint, cfg=feature_cfg
             )
 
-            # ---------- Camera setup (optional) ----------
+            # Camera setup (skipped in external-capture mode).
             self._cap = None
             self._source = source
             if source is not None:
@@ -321,7 +301,7 @@ class SurveillancePipeline:
         self._extractor_skip = feature_cfg.get("skip_frames", 3)
         self._current_feats: Dict[str, float] = {}
         self._current_driver_box: Optional[np.ndarray] = None
-        # key=event_type → {"pre_frames": list, "frames": [], "remaining": int, "trigger": dict}
+        # key=event_type -> {"pre_frames": list, "frames": [], "remaining": int, "trigger": dict}
         self._collecting_post: Dict[str, Dict[str, Any]] = {}
         self._fps_times: Deque[float] = deque(maxlen=60)
         self._recent_saved: Deque[Tuple[str, float]] = deque(maxlen=5)
@@ -342,14 +322,7 @@ class SurveillancePipeline:
         self._norm_std = std
 
     def process_frame(self, raw_frame: np.ndarray, timestamp_ms: int = None) -> dict:
-        """Run the full AI pipeline on a single frame and return telemetry.
-
-        This is the core method used by external capture mode (web dashboard).
-        The caller owns the camera; this method only does inference and state
-        updates.  It is NOT thread-safe — call it from a single thread.
-
-        Returns a telemetry dict (same schema as run_generator).
-        """
+        """Run the pipeline on one frame and return the telemetry dict; not thread-safe."""
         if timestamp_ms is None:
             timestamp_ms = int(time.time() * 1000)
         timestamp_s = timestamp_ms / 1000.0
@@ -457,13 +430,12 @@ class SurveillancePipeline:
         object_scores = self._current_object_scores
         detected_objects = self._current_detected_objects
 
-        # --- Heuristic Overrides ---
+        # Heuristic overrides on top of the model state.
         if driver_box is not None and feats:
             phys_yaw = feats.get("pitch", 0.0) - self._baseline_yaw
             phys_pitch = feats.get("roll", 0.0) - self._baseline_pitch
             gaze_pitch = feats.get("gaze_pitch", 0.0)
-            ear = feats.get("ear_avg", 1.0)
-            
+
             head_distracted = False
             if abs(phys_yaw) > 25.0:
                 head_distracted = True
@@ -568,10 +540,10 @@ class SurveillancePipeline:
         for trigger in triggers:
             evt = trigger["event_type"]
             if evt not in self._collecting_post:
-                # Add to recent events instantly so UI reflects it's recording
+                # Mark it now so the UI shows recording immediately.
                 self._recent_saved.append((evt, timestamp_s))
-                
-                # Contiguous Frame Deduplication: snapshot the current ring buffer frames
+
+                # Snapshot the ring buffer now to dedupe contiguous frames.
                 pre_frames = [f.copy() for f, _ in self._clip_writer._ring_buffer]
                 self._collecting_post[evt] = {
                     "pre_frames": pre_frames,
@@ -580,8 +552,7 @@ class SurveillancePipeline:
                     "trigger": trigger
                 }
 
-        # Build telemetry dict
-        # --- UI Display Boxes ---
+        # Derive the face box for the UI from the last landmark result.
         face_box = None
         if self._extractor._last_result and self._extractor._last_result.face_landmarks:
             try:
@@ -592,7 +563,6 @@ class SurveillancePipeline:
                 x1, y1 = int(min(xs) * w), int(min(ys) * h)
                 x2, y2 = int(max(xs) * w), int(max(ys) * h)
                 
-                # Add 15% padding
                 px, py = int(0.15 * (x2 - x1)), int(0.15 * (y2 - y1))
                 face_box = [max(0, x1 - px), max(0, y1 - py), min(w, x2 + px), min(h, y2 + py)]
             except IndexError:
@@ -627,11 +597,7 @@ class SurveillancePipeline:
         return telemetry
 
     def run_generator(self):
-        """Yield (raw_frame, hud_frame, telemetry_dict) per frame.
-
-        Uses the internal VideoCapture.  For external-capture mode, use
-        process_frame() directly instead.
-        """
+        """Yield (raw_frame, hud_frame, telemetry_dict) per frame from the internal VideoCapture."""
         if self._cap is None:
             raise RuntimeError("run_generator() requires a video source. "
                                "Use process_frame() for external-capture mode.")
@@ -676,7 +642,7 @@ class SurveillancePipeline:
 
     def run(self) -> None:
         """Run pipeline with OpenCV display (backward-compatible entry point)."""
-        logger.info("Surveillance started — q=quit  r=reset  h=help")
+        logger.info("Surveillance started - q=quit  r=reset  h=help")
         window = "DMS Surveillance"
         if self._display:
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
@@ -868,8 +834,8 @@ def main() -> None:
     logger.info("  Backend:   %s", args.backend)
     if args.backend == "hailo":
         logger.info("  HEF:       %s", hef_path)
-    logger.info("  Clips →    %s", _PROJECT_ROOT / clips_cfg.get("output_dir", "output/clips"))
-    logger.info("  Logs  →    %s", _PROJECT_ROOT / logging_cfg.get("output_dir", "output/logs"))
+    logger.info("  Clips:     %s", _PROJECT_ROOT / clips_cfg.get("output_dir", "output/clips"))
+    logger.info("  Logs:      %s", _PROJECT_ROOT / logging_cfg.get("output_dir", "output/logs"))
     logger.info("=" * 60)
 
     pipeline.run()

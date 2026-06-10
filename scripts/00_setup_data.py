@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
 
-"""
-00_setup_data.py — Extract and organize raw datasets for DMS training pipeline.
-
-Handles:
-  - DMD-Distraction (tar.gz archives)
-  - DMD-Drowsiness  (tar.gz archives)
-  - UTA-RLDD        (zip archives)
-
-After extraction, walks the directory tree and prints summary statistics:
-  # subjects, # face videos, # annotations per dataset.
-
-Usage:
-    python scripts/00_setup_data.py --config config/config.yaml
-"""
+"""extract raw DMD/UTA-RLDD/AUC archives and print per-dataset counts"""
 from __future__ import annotations
 
 import argparse
@@ -31,8 +18,6 @@ import yaml
 from tqdm import tqdm
 
 
-# Constants
-
 MARKER_FILENAME = ".extraction_complete"
 
 DATASET_EXTRACTORS = {
@@ -45,32 +30,28 @@ DATASET_EXTRACTORS = {
 logger = logging.getLogger("dms.setup_data")
 
 
-# Helpers
+# helpers
 
 def _setup_logging(level: str = "INFO") -> None:
-    """Configure root + dms loggers."""
     numeric = getattr(logging, level.upper(), logging.INFO)
-    fmt = "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s"
+    fmt = "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s"
     logging.basicConfig(level=numeric, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
 def _load_config(path: str) -> Dict[str, Any]:
-    """Load YAML configuration file."""
     cfg_path = Path(path)
     if not cfg_path.exists():
-        logger.warning("Config file %s not found — using defaults.", path)
+        logger.warning("config file %s not found, using defaults", path)
         return {}
     with open(cfg_path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
 
 
 def _is_extracted(dest_dir: Path) -> bool:
-    """Check whether the extraction marker file exists."""
     return (dest_dir / MARKER_FILENAME).exists()
 
 
 def _write_marker(dest_dir: Path) -> None:
-    """Create the marker file after successful extraction."""
     marker = dest_dir / MARKER_FILENAME
     marker.write_text(
         f"Extraction completed at {time.strftime('%Y-%m-%d %H:%M:%S')}\n",
@@ -78,15 +59,15 @@ def _write_marker(dest_dir: Path) -> None:
     )
 
 
-# Extraction functions
+# extraction
 
 def _extract_tar_gz(archive_path: Path, dest_dir: Path) -> int:
-    """Extract a .tar.gz archive with progress bar.  Returns member count."""
+    """extract a .tar.gz, returns member count"""
     with tarfile.open(archive_path, "r:gz") as tf:
         members = tf.getmembers()
         for member in tqdm(
             members,
-            desc=f"  ↳ {archive_path.name}",
+            desc=f"  {archive_path.name}",
             unit="file",
             leave=False,
         ):
@@ -98,12 +79,12 @@ def _extract_tar_gz(archive_path: Path, dest_dir: Path) -> int:
 
 
 def _extract_zip(archive_path: Path, dest_dir: Path) -> int:
-    """Extract a .zip archive with progress bar.  Returns member count."""
+    """extract a .zip, returns member count"""
     with zipfile.ZipFile(archive_path, "r") as zf:
         members = zf.infolist()
         for member in tqdm(
             members,
-            desc=f"  ↳ {archive_path.name}",
+            desc=f"  {archive_path.name}",
             unit="file",
             leave=False,
         ):
@@ -115,7 +96,7 @@ def _extract_zip(archive_path: Path, dest_dir: Path) -> int:
 
 
 def _find_archives(directory: Path, fmt: str) -> list[Path]:
-    """Return sorted list of archives in *directory* matching *fmt*."""
+    """sorted archives in directory matching fmt"""
     if fmt == "tar.gz":
         return sorted(directory.glob("*.tar.gz")) + sorted(directory.glob("*.tgz"))
     elif fmt == "zip":
@@ -124,24 +105,24 @@ def _find_archives(directory: Path, fmt: str) -> list[Path]:
 
 
 def extract_dataset(name: str, raw_dir: Path, fmt: str) -> None:
-    """Extract all archives for a single dataset."""
+    """extract all archives for a single dataset"""
     dataset_dir = raw_dir / name
     if not dataset_dir.exists():
-        logger.warning("Dataset directory not found: %s — skipping.", dataset_dir)
+        logger.warning("dataset directory not found: %s, skipping", dataset_dir)
         return
 
     if _is_extracted(dataset_dir):
-        logger.info("✓ %s already extracted (marker found). Skipping.", name)
+        logger.info("%s already extracted (marker found), skipping", name)
         return
 
     archives = _find_archives(dataset_dir, fmt)
     if not archives:
-        # Maybe already extracted without archives present
-        logger.info("No %s archives found in %s — assuming already extracted.", fmt, dataset_dir)
+        # no archives: treat as already extracted
+        logger.info("no %s archives found in %s, assuming already extracted", fmt, dataset_dir)
         _write_marker(dataset_dir)
         return
 
-    logger.info("Extracting %s (%d archive(s))…", name, len(archives))
+    logger.info("extracting %s (%d archives)", name, len(archives))
     total_members = 0
     for archive in archives:
         if fmt == "tar.gz":
@@ -151,13 +132,13 @@ def extract_dataset(name: str, raw_dir: Path, fmt: str) -> None:
         logger.info("  Extracted %s (%d items cumulative)", archive.name, total_members)
 
     _write_marker(dataset_dir)
-    logger.info("✓ %s extraction complete (%d total items).", name, total_members)
+    logger.info("%s extraction complete (%d total items)", name, total_members)
 
 
-# Statistics
+# stats
 
 def _scan_dmd(dataset_dir: Path, dataset_name: str) -> Dict[str, Any]:
-    """Walk a DMD dataset directory and collect stats."""
+    """walk a DMD dataset dir and collect stats"""
     stats: Dict[str, Any] = {
         "name": dataset_name,
         "groups": set(),
@@ -177,7 +158,7 @@ def _scan_dmd(dataset_dir: Path, dataset_name: str) -> Dict[str, Any]:
         rel = root_path.relative_to(dataset_dir)
         parts = rel.parts
 
-        # Detect group / subject / session from path hierarchy
+        # group/subject/session from path parts
         for part in parts:
             if part.startswith("g") and len(part) == 2 and part[1].isalpha():
                 stats["groups"].add(part)
@@ -190,8 +171,7 @@ def _scan_dmd(dataset_dir: Path, dataset_name: str) -> Dict[str, Any]:
             if fl.endswith((".mp4", ".avi", ".mkv")):
                 if "_face" in fl:
                     stats["face_videos"] += 1
-                    # Infer subject from parent path
-                    # e.g. gA/1/s1/gA_1_s1_face.mp4  → subject = "gA_1"
+                    # subject = first two stem parts (gA_1)
                     name_parts = Path(fname).stem.split("_")
                     if len(name_parts) >= 2:
                         stats["subjects"].add(f"{name_parts[0]}_{name_parts[1]}")
@@ -200,7 +180,6 @@ def _scan_dmd(dataset_dir: Path, dataset_name: str) -> Dict[str, Any]:
             elif fl.endswith(".json"):
                 stats["annotations"] += 1
 
-    # Convert sets for reporting
     stats["groups"] = sorted(stats["groups"])
     stats["subjects"] = sorted(stats["subjects"])
     stats["sessions"] = sorted(stats["sessions"])
@@ -208,7 +187,7 @@ def _scan_dmd(dataset_dir: Path, dataset_name: str) -> Dict[str, Any]:
 
 
 def _scan_uta_rldd(dataset_dir: Path) -> Dict[str, Any]:
-    """Walk the UTA-RLDD dataset directory and collect stats."""
+    """walk the UTA-RLDD dataset dir and collect stats"""
     stats: Dict[str, Any] = {
         "name": "UTA-RLDD",
         "subjects": set(),
@@ -225,7 +204,7 @@ def _scan_uta_rldd(dataset_dir: Path) -> Dict[str, Any]:
         rel = root_path.relative_to(dataset_dir)
         parts = rel.parts
 
-        # Subject folders are typically numeric (e.g., "1", "2", … "60")
+        # subject folders are numeric
         for part in parts:
             if part.isdigit():
                 stats["subjects"].add(part)
@@ -235,7 +214,7 @@ def _scan_uta_rldd(dataset_dir: Path) -> Dict[str, Any]:
             fl = fname.lower()
             if fl.endswith((".mp4", ".avi", ".mkv", ".mov")):
                 stats["videos"] += 1
-                # Detect drowsiness level from filename
+                # drowsiness level from filename
                 stem = Path(fname).stem
                 for level in ["10", "5", "0"]:
                     if level in stem:
@@ -247,7 +226,7 @@ def _scan_uta_rldd(dataset_dir: Path) -> Dict[str, Any]:
 
 
 def print_summary(raw_dir: Path) -> None:
-    """Print a comprehensive summary of all datasets."""
+    """print per-dataset counts"""
     logger.info("=" * 70)
     logger.info("DATASET SUMMARY")
     logger.info("=" * 70)
@@ -255,50 +234,45 @@ def print_summary(raw_dir: Path) -> None:
     # DMD-Distraction
     dmd_dist = _scan_dmd(raw_dir / "DMD-Distraction", "DMD-Distraction")
     logger.info("")
-    logger.info("┌─ DMD-Distraction ────────────────────────────────────")
-    logger.info("│  Groups:       %d  %s", len(dmd_dist["groups"]), dmd_dist["groups"])
-    logger.info("│  Subjects:     %d  %s", len(dmd_dist["subjects"]), dmd_dist["subjects"][:10])
+    logger.info("-- DMD-Distraction --")
+    logger.info("  Groups:       %d  %s", len(dmd_dist["groups"]), dmd_dist["groups"])
+    logger.info("  Subjects:     %d  %s", len(dmd_dist["subjects"]), dmd_dist["subjects"][:10])
     if len(dmd_dist["subjects"]) > 10:
-        logger.info("│                … and %d more", len(dmd_dist["subjects"]) - 10)
-    logger.info("│  Sessions:     %s", dmd_dist["sessions"])
-    logger.info("│  Face videos:  %d", dmd_dist["face_videos"])
-    logger.info("│  Other videos: %d", dmd_dist["other_videos"])
-    logger.info("│  Annotations:  %d", dmd_dist["annotations"])
-    logger.info("│  Total files:  %d", dmd_dist["total_files"])
-    logger.info("└──────────────────────────────────────────────────────")
+        logger.info("                ... and %d more", len(dmd_dist["subjects"]) - 10)
+    logger.info("  Sessions:     %s", dmd_dist["sessions"])
+    logger.info("  Face videos:  %d", dmd_dist["face_videos"])
+    logger.info("  Other videos: %d", dmd_dist["other_videos"])
+    logger.info("  Annotations:  %d", dmd_dist["annotations"])
+    logger.info("  Total files:  %d", dmd_dist["total_files"])
 
     # DMD-Drowsiness
     dmd_drow = _scan_dmd(raw_dir / "DMD-Drowsiness", "DMD-Drowsiness")
     logger.info("")
-    logger.info("┌─ DMD-Drowsiness ─────────────────────────────────────")
-    logger.info("│  Groups:       %d  %s", len(dmd_drow["groups"]), dmd_drow["groups"])
-    logger.info("│  Subjects:     %d  %s", len(dmd_drow["subjects"]), dmd_drow["subjects"][:10])
+    logger.info("-- DMD-Drowsiness --")
+    logger.info("  Groups:       %d  %s", len(dmd_drow["groups"]), dmd_drow["groups"])
+    logger.info("  Subjects:     %d  %s", len(dmd_drow["subjects"]), dmd_drow["subjects"][:10])
     if len(dmd_drow["subjects"]) > 10:
-        logger.info("│                … and %d more", len(dmd_drow["subjects"]) - 10)
-    logger.info("│  Sessions:     %s", dmd_drow["sessions"])
-    logger.info("│  Face videos:  %d", dmd_drow["face_videos"])
-    logger.info("│  Other videos: %d", dmd_drow["other_videos"])
-    logger.info("│  Annotations:  %d", dmd_drow["annotations"])
-    logger.info("│  Total files:  %d", dmd_drow["total_files"])
-    logger.info("└──────────────────────────────────────────────────────")
+        logger.info("                ... and %d more", len(dmd_drow["subjects"]) - 10)
+    logger.info("  Sessions:     %s", dmd_drow["sessions"])
+    logger.info("  Face videos:  %d", dmd_drow["face_videos"])
+    logger.info("  Other videos: %d", dmd_drow["other_videos"])
+    logger.info("  Annotations:  %d", dmd_drow["annotations"])
+    logger.info("  Total files:  %d", dmd_drow["total_files"])
 
     # UTA-RLDD
     uta = _scan_uta_rldd(raw_dir / "UTA-RLDD")
     logger.info("")
-    logger.info("┌─ UTA-RLDD ───────────────────────────────────────────")
-    logger.info("│  Subjects:     %d", len(uta["subjects"]))
-    logger.info("│  Videos:       %d", uta["videos"])
+    logger.info("-- UTA-RLDD --")
+    logger.info("  Subjects:     %d", len(uta["subjects"]))
+    logger.info("  Videos:       %d", uta["videos"])
     for lvl in sorted(uta["videos_by_level"].keys()):
         label = {"0": "Alert", "5": "Drowsy (low)", "10": "Drowsy (high)"}.get(lvl, lvl)
-        logger.info("│    Level %s (%s): %d", lvl, label, uta["videos_by_level"][lvl])
-    logger.info("│  Total files:  %d", uta["total_files"])
-    logger.info("└──────────────────────────────────────────────────────")
+        logger.info("    Level %s (%s): %d", lvl, label, uta["videos_by_level"][lvl])
+    logger.info("  Total files:  %d", uta["total_files"])
 
     logger.info("")
     logger.info("=" * 70)
 
-
-# Main
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -329,7 +303,6 @@ def main() -> None:
     _setup_logging(args.log_level)
     cfg = _load_config(args.config)
 
-    # Resolve data root
     project_root = Path(__file__).resolve().parent.parent
     data_root = Path(args.data_root) if args.data_root else Path(
         cfg.get("data", {}).get("root", project_root / "data")
@@ -345,17 +318,15 @@ def main() -> None:
     logger.info("Raw dir      : %s", raw_dir)
     logger.info("")
 
-    # Extract each dataset
     for dataset_name, fmt in DATASET_EXTRACTORS.items():
         try:
             extract_dataset(dataset_name, raw_dir, fmt)
         except Exception:
-            logger.exception("Failed to extract %s — continuing with remaining datasets.", dataset_name)
+            logger.exception("failed to extract %s, continuing with remaining datasets", dataset_name)
 
-    # Print summary
     print_summary(raw_dir)
 
-    logger.info("Setup complete.  Next step: python scripts/01_extract_features.py --config %s", args.config)
+    logger.info("setup complete")
 
 
 if __name__ == "__main__":

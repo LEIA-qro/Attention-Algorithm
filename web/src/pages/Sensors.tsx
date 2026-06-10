@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
-import { pick, useLang } from "@/lib/i18n";
+import { pick, useLang } from "@/lib/prefs";
 
 type Status = "unknown" | "ok" | "denied" | "unsupported" | "waiting";
 

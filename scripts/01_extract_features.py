@@ -1,28 +1,12 @@
 #!/usr/bin/env python3
 
-"""
-01_extract_features.py — Extract per-frame feature vectors from face videos.
-
-Pipeline per video:
-  1. Read frames with OpenCV
-  2. CLAHE preprocessing (src.preprocessing)
-  3. MediaPipe Face Landmarker v2 → 478 landmarks + blendshapes + 3D matrix
-  4. Compute 18-dim feature vector per frame (EAR, MAR, PERCLOS, head pose, gaze, …)
-  5. Assign per-frame label from annotation JSON (DMD) or folder name (UTA-RLDD)
-  6. Save .parquet to data/features/{dataset}/{subject_id}/{video_id}.parquet
-
-Usage:
-    python scripts/01_extract_features.py --config config/config.yaml
-    python scripts/01_extract_features.py --config config/config.yaml --workers 4
-    python scripts/01_extract_features.py --config config/config.yaml --dataset DMD-Distraction
-"""
+"""Extract per-frame feature vectors from face videos and save as parquet."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import logging
-import os
 import sys
 import urllib.request
 from collections import defaultdict
@@ -36,9 +20,7 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 
-# Project imports
-
-# We must ensure project root is on sys.path
+# put project root on sys.path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -48,7 +30,7 @@ from src.preprocessing import preprocess_frame  # noqa: E402
 
 logger = logging.getLogger("dms.extract_features")
 
-# MediaPipe model URL & local path
+# mediapipe model url and local path
 MEDIAPIPE_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
     "face_landmarker/face_landmarker/float16/latest/face_landmarker.task"
@@ -78,8 +60,8 @@ DMD_DROWSINESS_CLOSED_ACTIONS = {"Closing", "Closed", "Yawning", "Yawning-Closin
 
 UTA_RLDD_LABEL_MAP = {"0": "Alert", "5": "Drowsy", "10": "Drowsy"}
 
-# AUC v2: 10 classes → 3-class mapping
-# 0=Drive Safe → Alert, else → Distracted
+# auc v2: 10 classes -> 3-class mapping
+# 0=drive safe -> alert, else -> distracted
 
 AUC_V2_LABEL_MAP: Dict[int, str] = {
     0: "Alert",       # Drive Safe
@@ -135,14 +117,14 @@ FEATURE_COLUMNS = [
 
 def _setup_logging(level: str = "INFO") -> None:
     numeric = getattr(logging, level.upper(), logging.INFO)
-    fmt = "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s"
+    fmt = "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s"
     logging.basicConfig(level=numeric, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
 def _load_config(path: str) -> Dict[str, Any]:
     cfg_path = Path(path)
     if not cfg_path.exists():
-        logger.warning("Config %s not found — using defaults.", path)
+        logger.warning("Config %s not found, using defaults", path)
         return {}
     with open(cfg_path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
@@ -156,10 +138,10 @@ def ensure_mediapipe_model(models_dir: Path) -> Path:
         return model_path
 
     models_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading MediaPipe Face Landmarker model…")
+    logger.info("Downloading MediaPipe Face Landmarker model...")
     try:
         urllib.request.urlretrieve(MEDIAPIPE_MODEL_URL, str(model_path))
-        logger.info("✓ Downloaded to %s", model_path)
+        logger.info("downloaded to %s", model_path)
     except Exception as exc:
         logger.error("Failed to download MediaPipe model: %s", exc)
         logger.error("Please download manually from %s", MEDIAPIPE_MODEL_URL)
@@ -174,14 +156,14 @@ def parse_dmd_distraction_labels(json_path: Path, total_frames: int) -> List[str
     labels = ["Alert"] * total_frames  # default
 
     if not json_path.exists():
-        logger.warning("Annotation file not found: %s — all frames labelled Alert", json_path)
+        logger.warning("Annotation file not found: %s, all frames labelled Alert", json_path)
         return labels
 
     try:
         with open(json_path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Cannot parse %s: %s — all frames labelled Alert", json_path, exc)
+        logger.warning("Cannot parse %s: %s, all frames labelled Alert", json_path, exc)
         return labels
 
     # OpenLABEL structure: data -> openlabel -> actions
@@ -217,7 +199,7 @@ def parse_dmd_drowsiness_labels(json_path: Path, total_frames: int) -> List[str]
     labels = ["Alert"] * total_frames
 
     if not json_path.exists():
-        logger.warning("Drowsiness annotation not found: %s — all frames labelled Alert", json_path)
+        logger.warning("Drowsiness annotation not found: %s, all frames labelled Alert", json_path)
         return labels
 
     try:
@@ -476,8 +458,7 @@ def process_auc_v2_images(
                     continue
 
                 preprocessed = preprocess_frame(frame)
-                # MediaPipe video mode requires strictly monotonically increasing timestamps
-                # across the entire lifespan of the FaceLandmarker instance.
+                # mediapipe needs strictly increasing timestamps across the landmarker lifetime
                 global_frame_idx += 1
                 timestamp_ms = global_frame_idx * 100
 
@@ -553,7 +534,7 @@ def interpolate_missing_frames(
             i += 1
             continue
 
-        # Found a None — measure gap length
+        # found a none, measure gap length
         gap_start = i
         while i < n and result[i] is None:
             i += 1
@@ -568,7 +549,7 @@ def interpolate_missing_frames(
         next_idx = gap_end
 
         if prev_idx < 0 or next_idx >= n:
-            # Can't interpolate at boundaries — copy nearest valid
+            # cant interpolate at boundaries, copy nearest valid
             valid = result[prev_idx] if prev_idx >= 0 else (result[next_idx] if next_idx < n else None)
             if valid is not None:
                 for j in range(gap_start, gap_end):
@@ -630,13 +611,12 @@ def process_video(
     fps = cap.get(cv2.CAP_PROP_FPS) or 29.76
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total_frames <= 0:
-        logger.warning("Video %s reports 0 frames — skipping.", video_path)
+        logger.warning("Video %s reports 0 frames, skipping", video_path)
         cap.release()
         return None
 
     # Determine per-frame labels
     if dataset == "DMD-Distraction":
-        session = entry.get("session", "")
         ann_path = entry.get("annotation_path")
         labels = parse_dmd_distraction_labels(
             Path(ann_path) if ann_path else Path(""), total_frames
@@ -753,7 +733,7 @@ def process_video(
 
     # Save
     df.to_parquet(out_path, index=False, engine="pyarrow")
-    logger.debug("Saved %d frames → %s", len(df), out_path)
+    logger.debug("Saved %d frames -> %s", len(df), out_path)
     return out_path
 
 
@@ -839,7 +819,7 @@ def main() -> None:
     fail_count = 0
 
     if args.workers <= 1:
-        # Sequential — simpler debugging, progress bar per video
+        # sequential, simpler debugging, progress bar per video
         for entry in tqdm(all_entries, desc="Processing videos", unit="video"):
             result = process_video(
                 entry, str(mp_model_path), features_dir, args.max_interp_gap
@@ -849,7 +829,7 @@ def main() -> None:
             else:
                 fail_count += 1
     else:
-        # Parallel — video-level parallelism
+        # parallel, video-level parallelism
         work_items = [
             (entry, str(mp_model_path), str(features_dir), args.max_interp_gap)
             for entry in all_entries
@@ -874,13 +854,10 @@ def main() -> None:
                         fail_count += 1
                     pbar.update(1)
 
-    # Summary
-    logger.info("=" * 60)
-    logger.info("FEATURE EXTRACTION COMPLETE")
+    logger.info("feature extraction complete")
     logger.info("  Successful: %d", success_count)
     logger.info("  Failed:     %d", fail_count)
     logger.info("  Output dir: %s", features_dir)
-    logger.info("=" * 60)
 
     # Per-dataset feature file stats
     if features_dir.exists():

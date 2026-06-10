@@ -28,7 +28,7 @@ export function demoLiveState(): { state: DriverState; confidence: number; confi
   const elapsed = Date.now() - START;
   const i = Math.floor(elapsed / 3500) % SCRIPT.length;
   const state = SCRIPT[i];
-  // Gentle drift so the attention trace breathes instead of flatlining on Alert.
+  // deriva suave para que la traza de atencion respire en vez de quedar plana en Alerta
   const wobble = (Math.sin(elapsed / 1700) + 1) / 2; // 0..1
   const confidence =
     state === "Alert" ? 0.66 + wobble * 0.1 : 0.84 + (i % 3) * 0.04 + wobble * 0.03;
@@ -52,7 +52,7 @@ export function listSessions(): SessionListItem[] {
 const T0 = Date.parse("2026-06-05T14:02:00Z");
 const STEP = 90_000;
 
-// A path heading NE across Querétaro.
+// ruta hacia el NE cruzando Queretaro
 const TRACK: TrackPoint[] = Array.from({ length: 16 }, (_, i) => ({
   ts: new Date(T0 + i * STEP).toISOString(),
   lat: 20.5888 + i * 0.0026 + Math.sin(i / 2) * 0.0014,
@@ -89,7 +89,7 @@ function snapFor(state: DriverState): string {
         "<circle cx='160' cy='112' r='54' fill='none' stroke='#1B2430' stroke-width='3'/>" +
         eye +
         "<path d='M108 205 q52 -62 104 0' fill='#1B2430'/>" +
-        "<text x='12' y='226' fill='#9DAEC2' font-family='monospace' font-size='12'>frame • IMX500</text>" +
+        "<text x='12' y='226' fill='#9DAEC2' font-family='monospace' font-size='12'>frame | IMX500</text>" +
         "</svg>",
     )
   );
@@ -101,7 +101,7 @@ const DEMO_INCIDENTS: Incident[] = [
   { id: "i3", ts: new Date(T0 + 22 * 48_000).toISOString(), state: "Drowsy", confidence: 0.81, speed_kmh: 88, lat: TRACK[12].lat, lng: TRACK[12].lng, snapshot_key: "demo", snapshot_url: snapFor("Drowsy"), harsh_event: false },
 ];
 
-// Deterministic per-session incidents so the count in the list matches the detail.
+// incidentes deterministas por sesion para que el conteo de la lista coincida con el detalle
 function incidentsFor(count: number): Incident[] {
   if (count <= DEMO_INCIDENTS.length) return DEMO_INCIDENTS.slice(0, count);
   const extra: Incident[] = Array.from({ length: count - DEMO_INCIDENTS.length }, (_, k) => {

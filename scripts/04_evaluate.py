@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
 
-"""
-04_evaluate.py — Comprehensive evaluation of trained DriverStateNet on test set.
+"""Evaluate a trained DriverStateNet on the test split.
 
-Produces:
-  - Overall accuracy, per-class P/R/F1, macro F1, weighted F1
-  - Confusion matrix heatmap
-  - Per-dataset performance breakdown
-  - ROC curves per class
-  - Feature importance via permutation
-  - All plots saved to models/evaluation/
-
-Usage:
-    python scripts/04_evaluate.py --config config/config.yaml
-    python scripts/04_evaluate.py --config config/config.yaml --checkpoint models/best_model.pt
+Writes metrics, confusion matrix, ROC curves, per-dataset breakdown, and
+permutation feature importance to models/evaluation/.
 """
 
 from __future__ import annotations
@@ -48,7 +38,7 @@ from tqdm import tqdm
 
 import yaml
 
-# Project imports
+# put project root on sys.path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -71,11 +61,9 @@ FEATURE_COLS = [
 ]
 
 
-# Helpers
-
 def _setup_logging(level: str = "INFO") -> None:
     numeric = getattr(logging, level.upper(), logging.INFO)
-    fmt = "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s"
+    fmt = "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s"
     logging.basicConfig(level=numeric, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
@@ -87,10 +75,9 @@ def _load_config(path: str) -> Dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
-# Dataset for evaluation (with metadata for per-dataset breakdown)
-
+# carries dataset/subject metadata so we can break down by source dataset
 class EvalSlidingWindowDataset(Dataset):
-    """Sliding-window dataset that also tracks dataset/subject metadata per window."""
+    """sliding-window dataset that also tracks dataset/subject metadata per window"""
 
     def __init__(
         self,
@@ -101,7 +88,7 @@ class EvalSlidingWindowDataset(Dataset):
         self.seq_len = seq_len
         self.stride = stride
         self.windows: List[Tuple[np.ndarray, int]] = []
-        self.metadata: List[Dict[str, str]] = []  # per-window metadata
+        self.metadata: List[Dict[str, str]] = []
 
         split_df = pd.read_csv(split_csv)
         feature_files = split_df["feature_file"].tolist()
@@ -153,15 +140,13 @@ class EvalSlidingWindowDataset(Dataset):
         return torch.from_numpy(features), torch.tensor(label, dtype=torch.long)
 
 
-# Inference
-
 @torch.no_grad()
 def run_inference(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run inference.  Returns (all_labels, all_preds, all_probs)."""
+    """returns (all_labels, all_preds, all_probs)"""
     model.eval()
     all_labels = []
     all_preds = []
@@ -180,21 +165,19 @@ def run_inference(
     return np.array(all_labels), np.array(all_preds), np.array(all_probs)
 
 
-# Plot functions
-
 def plot_confusion_matrix_heatmap(
     labels: np.ndarray,
     preds: np.ndarray,
     save_path: Path,
 ) -> None:
-    """Generate and save a confusion matrix heatmap."""
+    """confusion matrix heatmap, raw counts and row-normalized"""
     cm = confusion_matrix(labels, preds, labels=list(range(len(LABEL_NAMES))))
     cm_normalized = cm.astype(float) / cm.sum(axis=1, keepdims=True)
     cm_normalized = np.nan_to_num(cm_normalized)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Raw counts
+    # raw counts
     sns.heatmap(
         cm, annot=True, fmt="d", cmap="Blues",
         xticklabels=LABEL_NAMES, yticklabels=LABEL_NAMES,
@@ -204,7 +187,7 @@ def plot_confusion_matrix_heatmap(
     axes[0].set_ylabel("True")
     axes[0].set_title("Confusion Matrix (counts)")
 
-    # Normalized
+    # normalized
     sns.heatmap(
         cm_normalized, annot=True, fmt=".2%", cmap="Blues",
         xticklabels=LABEL_NAMES, yticklabels=LABEL_NAMES,
@@ -217,7 +200,7 @@ def plot_confusion_matrix_heatmap(
     plt.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    logger.info("Saved confusion matrix → %s", save_path)
+    logger.info("saved confusion matrix -> %s", save_path)
 
 
 def plot_roc_curves(
@@ -225,7 +208,7 @@ def plot_roc_curves(
     probs: np.ndarray,
     save_path: Path,
 ) -> None:
-    """Generate ROC curves for each class (one-vs-rest)."""
+    """per-class ROC curves, one-vs-rest"""
     fig, ax = plt.subplots(figsize=(8, 6))
     colors = ["#2ecc71", "#e67e22", "#e74c3c"]
 
@@ -234,7 +217,7 @@ def plot_roc_curves(
         cls_probs = probs[:, cls_idx]
 
         if binary_labels.sum() == 0 or binary_labels.sum() == len(binary_labels):
-            logger.warning("Class %s has no positive/negative samples — skipping ROC.", cls_name)
+            logger.warning("class %s has no positive/negative samples, skipping ROC", cls_name)
             continue
 
         fpr, tpr, _ = roc_curve(binary_labels, cls_probs)
@@ -252,7 +235,7 @@ def plot_roc_curves(
     plt.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    logger.info("Saved ROC curves → %s", save_path)
+    logger.info("saved ROC curves -> %s", save_path)
 
 
 def plot_per_dataset_breakdown(
@@ -261,7 +244,7 @@ def plot_per_dataset_breakdown(
     metadata: List[Dict[str, str]],
     save_path: Path,
 ) -> Dict[str, Dict[str, float]]:
-    """Compute and plot per-dataset metrics breakdown."""
+    """per-dataset metrics breakdown, returns the metrics dict"""
     dataset_labels: Dict[str, List[int]] = defaultdict(list)
     dataset_preds: Dict[str, List[int]] = defaultdict(list)
 
@@ -296,7 +279,6 @@ def plot_per_dataset_breakdown(
         for ci, cn in enumerate(LABEL_NAMES):
             results[ds][f"f1_{cn.lower()}"] = float(f1[ci])
 
-        # Confusion matrix subplot
         cm = confusion_matrix(ds_labels, ds_preds, labels=list(range(len(LABEL_NAMES))))
         cm_norm = cm.astype(float) / (cm.sum(axis=1, keepdims=True) + 1e-9)
 
@@ -312,12 +294,10 @@ def plot_per_dataset_breakdown(
     plt.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    logger.info("Saved per-dataset breakdown → %s", save_path)
+    logger.info("saved per-dataset breakdown -> %s", save_path)
 
     return results
 
-
-# Feature importance via permutation
 
 @torch.no_grad()
 def permutation_feature_importance(
@@ -327,13 +307,10 @@ def permutation_feature_importance(
     n_repeats: int = 5,
     save_path: Optional[Path] = None,
 ) -> Dict[str, float]:
-    """Compute permutation importance for each feature.
-
-    Measures the drop in macro F1 when each feature is shuffled.
-    """
+    """permutation importance: macro-F1 drop when each feature is shuffled"""
     model.eval()
 
-    # Baseline predictions
+    # baseline preds
     loader = DataLoader(dataset, batch_size=512, shuffle=False, num_workers=0)
     all_labels = []
     all_preds = []
@@ -351,17 +328,15 @@ def permutation_feature_importance(
     for feat_idx, feat_name in enumerate(tqdm(FEATURE_COLS, desc="Permutation importance")):
         drops = []
         for _ in range(n_repeats):
-            # Permute this feature across all windows
             permuted_preds = []
             for i in range(len(dataset)):
                 feats_orig, _ = dataset[i]
                 feats_perm = feats_orig.clone()
-                # Shuffle this feature across the sequence dimension
+                # shuffle this feature along the sequence dim
                 perm_idx = torch.randperm(feats_perm.size(0))
                 feats_perm[:, feat_idx] = feats_perm[perm_idx, feat_idx]
                 permuted_preds.append(feats_perm)
 
-            # Batch predict
             permuted_stack = torch.stack(permuted_preds).to(device)
             perm_preds_list = []
             for batch_start in range(0, len(permuted_stack), 512):
@@ -374,10 +349,8 @@ def permutation_feature_importance(
 
         importances[feat_name] = float(np.mean(drops))
 
-    # Sort by importance
     sorted_imp = dict(sorted(importances.items(), key=lambda x: x[1], reverse=True))
 
-    # Plot
     if save_path:
         fig, ax = plt.subplots(figsize=(10, 6))
         names = list(sorted_imp.keys())
@@ -387,7 +360,7 @@ def permutation_feature_importance(
         ax.barh(range(len(names)), values, color=colors, edgecolor="white", linewidth=0.5)
         ax.set_yticks(range(len(names)))
         ax.set_yticklabels(names)
-        ax.set_xlabel("ΔF1 (drop when permuted)")
+        ax.set_xlabel("delta F1 (drop when permuted)")
         ax.set_title("Feature Importance (Permutation)")
         ax.invert_yaxis()
         ax.grid(axis="x", alpha=0.3)
@@ -395,12 +368,10 @@ def permutation_feature_importance(
         plt.tight_layout()
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
-        logger.info("Saved feature importance → %s", save_path)
+        logger.info("saved feature importance -> %s", save_path)
 
     return sorted_imp
 
-
-# Main
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate DriverStateNet on test set.")
@@ -430,7 +401,6 @@ def main() -> None:
         logger.error("Test split not found: %s", test_csv)
         sys.exit(1)
 
-    # Load checkpoint
     ckpt_path = Path(args.checkpoint) if args.checkpoint else models_dir / "best_model.pt"
     if not ckpt_path.exists():
         logger.error("Checkpoint not found: %s", ckpt_path)
@@ -455,7 +425,6 @@ def main() -> None:
     logger.info("Loaded model from %s (epoch %d, val F1=%.4f)",
                 ckpt_path, ckpt.get("epoch", -1), ckpt.get("best_val_f1", 0))
 
-    # Load test data
     seq_len = ckpt.get("hparams", {}).get("seq_len", 90)
     stride = ckpt.get("hparams", {}).get("stride", 15)
 
@@ -468,10 +437,8 @@ def main() -> None:
         logger.error("Test dataset is empty!")
         sys.exit(1)
 
-    # Run inference
     labels, preds, probs = run_inference(model, test_loader, device)
 
-    # Overall metrics
     acc = accuracy_score(labels, preds)
     macro_f1 = f1_score(labels, preds, average="macro", zero_division=0)
     weighted_f1 = f1_score(labels, preds, average="weighted", zero_division=0)
@@ -494,7 +461,6 @@ def main() -> None:
     logger.info("")
     logger.info("Classification Report:\n%s", report)
 
-    # Save metrics JSON
     prec, rec, f1, support = precision_recall_fscore_support(
         labels, preds, labels=list(range(len(LABEL_NAMES))), zero_division=0
     )
@@ -517,15 +483,11 @@ def main() -> None:
     metrics_path = eval_dir / "test_metrics.json"
     with open(metrics_path, "w", encoding="utf-8") as fh:
         json.dump(metrics, fh, indent=2)
-    logger.info("Saved metrics → %s", metrics_path)
+    logger.info("saved metrics -> %s", metrics_path)
 
-    # Confusion matrix
     plot_confusion_matrix_heatmap(labels, preds, eval_dir / "confusion_matrix.png")
-
-    # ROC curves
     plot_roc_curves(labels, probs, eval_dir / "roc_curves.png")
 
-    # Per-dataset breakdown
     ds_results = plot_per_dataset_breakdown(
         labels, preds, test_dataset.metadata, eval_dir / "per_dataset_breakdown.png"
     )
@@ -535,15 +497,13 @@ def main() -> None:
     for ds, res in ds_results.items():
         logger.info("  %s: acc=%.3f F1=%.3f (n=%d)", ds, res["accuracy"], res["macro_f1"], res["n_samples"])
 
-    # Save per-dataset JSON
     ds_metrics_path = eval_dir / "per_dataset_metrics.json"
     with open(ds_metrics_path, "w", encoding="utf-8") as fh:
         json.dump(ds_results, fh, indent=2)
 
-    # Feature importance
     if not args.skip_permutation:
         logger.info("")
-        logger.info("Computing permutation feature importance (this may take a while)…")
+        logger.info("computing permutation feature importance (this may take a while)")
         importances = permutation_feature_importance(
             model, test_dataset, device,
             n_repeats=args.perm_repeats,
@@ -551,7 +511,7 @@ def main() -> None:
         )
         logger.info("Top-5 features by importance:")
         for i, (name, imp) in enumerate(list(importances.items())[:5]):
-            logger.info("  %d. %s: ΔF1 = %.4f", i + 1, name, imp)
+            logger.info("  %d. %s: delta F1 = %.4f", i + 1, name, imp)
 
         imp_path = eval_dir / "feature_importance.json"
         with open(imp_path, "w", encoding="utf-8") as fh:
@@ -559,7 +519,6 @@ def main() -> None:
     else:
         logger.info("Skipping permutation importance (--skip-permutation)")
 
-    # Done
     logger.info("")
     logger.info("=" * 70)
     logger.info("EVALUATION COMPLETE")

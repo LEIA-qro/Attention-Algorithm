@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
 
-"""
-05_export_onnx.py — Export trained DriverStateNet to ONNX format.
-
-Steps:
-  1. Load best_model.pt checkpoint
-  2. Export with torch.onnx.export (dynamic batch axis)
-  3. Validate with onnxruntime
-  4. Numerical comparison (max abs error < 1e-5)
-  5. Save feature_config.json with feature names, normalization info, thresholds
-
-Usage:
-    python scripts/05_export_onnx.py --config config/config.yaml
-    python scripts/05_export_onnx.py --checkpoint models/best_model.pt --output models/driver_state_net.onnx
-"""
+"""Export trained DriverStateNet to ONNX and write feature_config.json."""
 
 from __future__ import annotations
 
@@ -50,7 +37,7 @@ FEATURE_COLS = [
 
 def _setup_logging(level: str = "INFO") -> None:
     numeric = getattr(logging, level.upper(), logging.INFO)
-    fmt = "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s"
+    fmt = "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s"
     logging.basicConfig(level=numeric, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
@@ -94,9 +81,8 @@ def export_to_onnx(
         },
     )
 
-    logger.info("✓ ONNX export complete → %s", onnx_path)
+    logger.info("onnx export complete: %s", onnx_path)
 
-    # Verify file size
     size_mb = onnx_path.stat().st_size / (1024 * 1024)
     logger.info("  File size: %.2f MB", size_mb)
 
@@ -109,10 +95,7 @@ def validate_onnx(
     tolerance: float = 5e-2,
     n_test_batches: int = 5,
 ) -> bool:
-    """Validate ONNX model against PyTorch model.
-
-    Returns True if validation passes.
-    """
+    """check the onnx graph and compare outputs against pytorch; True if within tolerance"""
     try:
         import onnx
         import onnxruntime as ort
@@ -120,17 +103,16 @@ def validate_onnx(
         logger.error("Install onnx and onnxruntime: pip install onnx onnxruntime")
         return False
 
-    # Verify ONNX graph
-    logger.info("Validating ONNX graph…")
+    logger.info("validating onnx graph")
     onnx_model = onnx.load(str(onnx_path))
     try:
         onnx.checker.check_model(onnx_model)
-        logger.info("  ✓ ONNX graph is valid")
+        logger.info("  onnx graph is valid")
     except onnx.checker.ValidationError as exc:
-        logger.error("  ✗ ONNX validation failed: %s", exc)
+        logger.error("  onnx validation failed: %s", exc)
         return False
 
-    # Setup ONNX Runtime
+    # onnx runtime session
     providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
     available_providers = ort.get_available_providers()
     use_providers = [p for p in providers if p in available_providers]
@@ -138,14 +120,12 @@ def validate_onnx(
 
     session = ort.InferenceSession(str(onnx_path), providers=use_providers)
 
-    # Check I/O
     for inp in session.get_inputs():
         logger.info("  Input:  %s  shape=%s  dtype=%s", inp.name, inp.shape, inp.type)
     for out in session.get_outputs():
         logger.info("  Output: %s  shape=%s  dtype=%s", out.name, out.shape, out.type)
 
-    # Numerical comparison
-    logger.info("Running numerical comparison (%d test batches)…", n_test_batches)
+    logger.info("running numerical comparison (%d test batches)", n_test_batches)
     model.eval()
     device = next(model.parameters()).device
     max_abs_error = 0.0
@@ -155,18 +135,16 @@ def validate_onnx(
         batch_size = np.random.randint(1, 17)
         test_input = np.random.randn(batch_size, seq_len, input_size).astype(np.float32)
 
-        # PyTorch
         torch_input = torch.from_numpy(test_input).to(device)
         with torch.no_grad():
             torch_output = model(torch_input).cpu().numpy()
 
-        # ONNX Runtime
         ort_output = session.run(None, {"features": test_input})[0]
 
         abs_error = np.max(np.abs(torch_output - ort_output))
         max_abs_error = max(max_abs_error, abs_error)
 
-        status = "✓" if abs_error < tolerance else "✗"
+        status = "ok" if abs_error < tolerance else "FAIL"
         logger.info(
             "  Batch %d (size=%d): max_abs_error = %.2e  %s",
             batch_idx + 1, batch_size, abs_error, status,
@@ -178,9 +156,9 @@ def validate_onnx(
     logger.info("Overall max absolute error: %.2e (threshold: %.1e)", max_abs_error, tolerance)
 
     if all_passed:
-        logger.info("✓ Numerical validation PASSED")
+        logger.info("numerical validation passed")
     else:
-        logger.error("✗ Numerical validation FAILED — errors exceed tolerance!")
+        logger.error("numerical validation failed: errors exceed tolerance")
 
     return all_passed
 
@@ -189,7 +167,7 @@ def save_feature_config(
     ckpt: Dict[str, Any],
     save_path: Path,
 ) -> None:
-    """Save feature_config.json with everything the deployment team needs."""
+    """write feature_config.json for deployment"""
     hparams = ckpt.get("hparams", {})
     model_config = ckpt.get("model_config", {})
     label_map = ckpt.get("label_map", {"Alert": 0, "Drowsy": 1, "Distracted": 2})
@@ -208,8 +186,8 @@ def save_feature_config(
             "names": FEATURE_COLS,
             "count": len(FEATURE_COLS),
             "description": {
-                "ear_left": "Eye Aspect Ratio — left eye",
-                "ear_right": "Eye Aspect Ratio — right eye",
+                "ear_left": "Eye Aspect Ratio - left eye",
+                "ear_right": "Eye Aspect Ratio - right eye",
                 "ear_avg": "Average EAR (left + right) / 2",
                 "mar": "Mouth Aspect Ratio (yawn detection)",
                 "perclos": "Percentage of eye closure over 60s (P80)",
@@ -223,9 +201,9 @@ def save_feature_config(
                 "gaze_stability": "Std-dev of gaze angle over 1s window",
                 "head_pose_stability": "Std-dev of head pose over 1s window",
                 "ear_velocity": "Rate of change of EAR (d(ear_avg)/dt)",
-                "head_nod_count": "Number of pitch dips >15° in rolling 10s",
+                "head_nod_count": "Number of pitch dips >15 deg in rolling 10s",
                 "mouth_open_duration": "Consecutive frames with MAR > threshold",
-                "eyes_off_road_pct": "% time gaze >30° from center in 5s window",
+                "eyes_off_road_pct": "% time gaze >30 deg from center in 5s window",
             },
         },
         "labels": {
@@ -258,10 +236,8 @@ def save_feature_config(
     with open(save_path, "w", encoding="utf-8") as fh:
         json.dump(config, fh, indent=2)
 
-    logger.info("Saved feature config → %s", save_path)
+    logger.info("saved feature config: %s", save_path)
 
-
-# Main
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export DriverStateNet to ONNX.")
@@ -274,7 +250,6 @@ def main() -> None:
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
-    cfg = _load_config(args.config)
 
     project_root = _PROJECT_ROOT
     models_dir = project_root / "models"
@@ -286,8 +261,7 @@ def main() -> None:
         logger.error("Checkpoint not found: %s", ckpt_path)
         sys.exit(1)
 
-    # Load model
-    device = torch.device("cpu")  # export on CPU for portability
+    device = torch.device("cpu")  # export on cpu for portability
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     model_config = ckpt.get("model_config", {})
 
@@ -308,32 +282,25 @@ def main() -> None:
     total_params = sum(p.numel() for p in model.parameters())
     logger.info("Parameters: %s", f"{total_params:,}")
 
-    # Export
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
     export_to_onnx(model, onnx_path, seq_len=seq_len, input_size=input_size, opset_version=args.opset)
 
-    # Validate
     passed = validate_onnx(
         onnx_path, model,
         seq_len=seq_len, input_size=input_size,
         tolerance=args.tolerance,
     )
 
-    # Save feature config
     config_path = models_dir / "feature_config.json"
     save_feature_config(ckpt, config_path)
 
-    # Summary
-    logger.info("")
-    logger.info("=" * 60)
-    logger.info("ONNX EXPORT COMPLETE")
-    logger.info("  ONNX model:      %s", onnx_path)
-    logger.info("  Feature config:  %s", config_path)
-    logger.info("  Validation:      %s", "PASSED ✓" if passed else "FAILED ✗")
-    logger.info("=" * 60)
+    logger.info("onnx export complete")
+    logger.info("  onnx model:      %s", onnx_path)
+    logger.info("  feature config:  %s", config_path)
+    logger.info("  validation:      %s", "PASSED" if passed else "FAILED")
 
     if not passed:
-        logger.warning("ONNX numerical validation failed! Check the model export.")
+        logger.warning("onnx numerical validation failed, check the model export")
         sys.exit(1)
 
     logger.info("Next step: python scripts/06_inference_demo.py --config %s", args.config)

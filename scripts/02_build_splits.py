@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
 
-"""
-02_build_splits.py — Create subject-disjoint train/val/test splits.
+"""build subject-disjoint train/val/test splits from feature parquets.
 
-Groups all feature .parquet files by (dataset, subject_id), then performs
-a stratified subject-level split: 70% train / 15% val / 15% test.
-Ensures each split has representation from every dataset.
-
-Outputs:
-    data/splits/train.csv
-    data/splits/val.csv
-    data/splits/test.csv
-
-Usage:
-    python scripts/02_build_splits.py --config config/config.yaml
+groups parquets by (dataset, subject_id), then stratified subject-level
+split 70/15/15 with every dataset represented in each split.
 """
 
 from __future__ import annotations
@@ -21,7 +11,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -36,41 +25,33 @@ SPLIT_RATIOS = {"train": 0.70, "val": 0.15, "test": 0.15}
 LABEL_NAMES = ["Alert", "Drowsy", "Distracted"]
 
 
-# Helpers
-
 def _setup_logging(level: str = "INFO") -> None:
     numeric = getattr(logging, level.upper(), logging.INFO)
-    fmt = "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s"
+    fmt = "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s"
     logging.basicConfig(level=numeric, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
 def _load_config(path: str) -> Dict[str, Any]:
     cfg_path = Path(path)
     if not cfg_path.exists():
-        logger.warning("Config %s not found — using defaults.", path)
+        logger.warning("config %s not found, using defaults", path)
         return {}
     with open(cfg_path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
 
 
-# Data inventory
-
 def build_inventory(features_dir: Path) -> pd.DataFrame:
-    """Scan all .parquet files and build a per-file inventory DataFrame.
-
-    Columns: feature_file, dataset, subject_id, video_id, n_frames,
-             n_alert, n_drowsy, n_distracted, dominant_label
-    """
+    """build a per-file inventory dataframe from feature parquets"""
     records = []
     parquet_files = sorted(features_dir.rglob("*.parquet"))
 
-    logger.info("Scanning %d parquet files in %s …", len(parquet_files), features_dir)
+    logger.info("scanning %d parquet files in %s", len(parquet_files), features_dir)
 
-    for pf in tqdm(parquet_files, desc="Building inventory", unit="file"):
+    for pf in tqdm(parquet_files, desc="building inventory", unit="file"):
         try:
             df = pd.read_parquet(pf, columns=["dataset", "subject_id", "video_id", "label"])
         except Exception as exc:
-            logger.warning("Cannot read %s: %s — skipping.", pf, exc)
+            logger.warning("cannot read %s: %s, skipping", pf, exc)
             continue
 
         if df.empty:
@@ -103,12 +84,10 @@ def build_inventory(features_dir: Path) -> pd.DataFrame:
     return inventory
 
 
-# Subject-disjoint stratified splitting
-
 def _compute_subject_profile(
     inventory: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Aggregate per-subject stats for stratification."""
+    """aggregate per-subject stats for stratification"""
     grouped = inventory.groupby(["dataset", "subject_id"]).agg(
         n_files=("feature_file", "count"),
         total_frames=("n_frames", "sum"),
@@ -117,7 +96,7 @@ def _compute_subject_profile(
         n_distracted=("n_distracted", "sum"),
     ).reset_index()
 
-    # Dominant class for each subject (for stratification)
+    # dominant class per subject
     grouped["dominant_class"] = grouped[["n_alert", "n_drowsy", "n_distracted"]].idxmax(axis=1)
     grouped["dominant_class"] = grouped["dominant_class"].map({
         "n_alert": "Alert",
@@ -134,14 +113,13 @@ def stratified_subject_split(
     val_ratio: float = 0.15,
     seed: int = 42,
 ) -> Dict[str, List[Tuple[str, str]]]:
-    """Split subjects into train/val/test, stratified by dataset × dominant_class.
+    """split subjects into train/val/test, stratified by dataset x dominant_class.
 
-    Returns dict mapping split name → list of (dataset, subject_id) tuples.
+    returns dict mapping split name -> list of (dataset, subject_id) tuples.
     """
     rng = np.random.RandomState(seed)
     splits: Dict[str, List[Tuple[str, str]]] = {"train": [], "val": [], "test": []}
 
-    # Group by (dataset, dominant_class)
     strata = subject_profiles.groupby(["dataset", "dominant_class"])
 
     for (ds, dc), group_df in strata:
@@ -153,7 +131,7 @@ def stratified_subject_split(
         n_val = max(1 if n > 1 else 0, int(round(n * val_ratio)))
         n_test = n - n_train - n_val
 
-        # Ensure at least 1 in each split when possible
+        # keep >=1 per split where n allows
         if n_test < 0:
             n_val = max(0, n - n_train)
             n_test = 0
@@ -175,14 +153,12 @@ def stratified_subject_split(
     return splits
 
 
-# Split CSV generation
-
 def create_split_csvs(
     inventory: pd.DataFrame,
     splits: Dict[str, List[Tuple[str, str]]],
     splits_dir: Path,
 ) -> None:
-    """Write train.csv, val.csv, test.csv to splits_dir."""
+    """write train.csv, val.csv, test.csv to splits_dir"""
     splits_dir.mkdir(parents=True, exist_ok=True)
 
     for split_name, subject_keys in splits.items():
@@ -195,17 +171,15 @@ def create_split_csvs(
 
         out_path = splits_dir / f"{split_name}.csv"
         split_df.to_csv(out_path, index=False)
-        logger.info("Saved %s: %d files, %d subjects → %s",
+        logger.info("saved %s: %d files, %d subjects -> %s",
                      split_name, len(split_df), split_df["subject_id"].nunique(), out_path)
 
-
-# Summary printing
 
 def print_split_stats(
     inventory: pd.DataFrame,
     splits: Dict[str, List[Tuple[str, str]]],
 ) -> None:
-    """Print detailed statistics for each split."""
+    """log per-split statistics"""
     logger.info("")
     logger.info("=" * 72)
     logger.info("SPLIT STATISTICS")
@@ -228,31 +202,26 @@ def print_split_stats(
         total_labelled = n_alert + n_drowsy + n_distracted
 
         logger.info("")
-        logger.info("┌─ %s ─────────────────────────────────────────────", split_name.upper())
-        logger.info("│  Subjects:       %d", n_subjects)
-        logger.info("│  Feature files:  %d", n_files)
-        logger.info("│  Total frames:   %s", f"{total_frames:,}")
-        logger.info("│  ──────────────────────────────────────────")
+        logger.info("[ %s ]", split_name.upper())
+        logger.info("  Subjects:       %d", n_subjects)
+        logger.info("  Feature files:  %d", n_files)
+        logger.info("  Total frames:   %s", f"{total_frames:,}")
         if total_labelled > 0:
-            logger.info("│  Alert:          %s  (%.1f%%)", f"{n_alert:>8,}", 100 * n_alert / total_labelled)
-            logger.info("│  Drowsy:         %s  (%.1f%%)", f"{n_drowsy:>8,}", 100 * n_drowsy / total_labelled)
-            logger.info("│  Distracted:     %s  (%.1f%%)", f"{n_distracted:>8,}", 100 * n_distracted / total_labelled)
-        logger.info("│  ──────────────────────────────────────────")
+            logger.info("  Alert:          %s  (%.1f%%)", f"{n_alert:>8,}", 100 * n_alert / total_labelled)
+            logger.info("  Drowsy:         %s  (%.1f%%)", f"{n_drowsy:>8,}", 100 * n_drowsy / total_labelled)
+            logger.info("  Distracted:     %s  (%.1f%%)", f"{n_distracted:>8,}", 100 * n_distracted / total_labelled)
 
-        # Per-dataset breakdown
         for ds in sorted(split_df["dataset"].unique()):
             ds_mask = split_df["dataset"] == ds
             ds_subj = split_df[ds_mask]["subject_id"].nunique()
             ds_files = int(ds_mask.sum())
             ds_frames = int(split_df[ds_mask]["n_frames"].sum())
-            logger.info("│  %-20s  %d subj, %d files, %s frames",
+            logger.info("  %-20s  %d subj, %d files, %s frames",
                          ds, ds_subj, ds_files, f"{ds_frames:,}")
-
-        logger.info("└──────────────────────────────────────────────────")
 
     logger.info("")
 
-    # Check for data leakage
+    # subject overlap = leakage
     train_set = set(splits["train"])
     val_set = set(splits["val"])
     test_set = set(splits["test"])
@@ -262,18 +231,16 @@ def print_split_stats(
     overlap_vt = val_set & test_set
 
     if overlap_tv or overlap_tt or overlap_vt:
-        logger.error("⚠ DATA LEAKAGE DETECTED!")
+        logger.error("DATA LEAKAGE DETECTED")
         if overlap_tv:
-            logger.error("  Train ∩ Val:  %s", overlap_tv)
+            logger.error("  Train and Val:  %s", overlap_tv)
         if overlap_tt:
-            logger.error("  Train ∩ Test: %s", overlap_tt)
+            logger.error("  Train and Test: %s", overlap_tt)
         if overlap_vt:
-            logger.error("  Val ∩ Test:   %s", overlap_vt)
+            logger.error("  Val and Test:   %s", overlap_vt)
     else:
-        logger.info("✓ No subject overlap between splits — data leakage check passed.")
+        logger.info("no subject overlap between splits - data leakage check passed")
 
-
-# Main
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -302,17 +269,14 @@ def main() -> None:
         logger.error("Run 01_extract_features.py first.")
         sys.exit(1)
 
-    # Build inventory
     inventory = build_inventory(features_dir)
     if inventory.empty:
         logger.error("No parquet files found in %s", features_dir)
         sys.exit(1)
 
-    # Subject profiles for stratification
     subject_profiles = _compute_subject_profile(inventory)
     logger.info("Subject profiles:\n%s", subject_profiles.to_string(index=False))
 
-    # Split
     splits = stratified_subject_split(
         subject_profiles,
         train_ratio=args.train_ratio,
@@ -320,13 +284,8 @@ def main() -> None:
         seed=args.seed,
     )
 
-    # Save CSVs
     create_split_csvs(inventory, splits, splits_dir)
-
-    # Print stats
     print_split_stats(inventory, splits)
-
-    logger.info("Next step: python scripts/03_train_model.py --config %s", args.config)
 
 
 if __name__ == "__main__":

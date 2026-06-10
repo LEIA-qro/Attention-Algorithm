@@ -11,8 +11,7 @@ import { AttentionTrace } from "@/components/AttentionTrace";
 import { PreTripCard } from "@/components/PreTripCard";
 import { SettingsButton } from "@/components/SettingsButton";
 import { TestZone } from "@/components/TestZone";
-import { pick, useLang } from "@/lib/i18n";
-import { getSettings, useSettings } from "@/lib/settings";
+import { pick, useLang, getSettings, useSettings } from "@/lib/prefs";
 import { STATE_COLOR } from "@/lib/stateColors";
 import type { DriverState } from "@/lib/types";
 
@@ -34,8 +33,7 @@ export default function Conductor() {
   useWakeLock(running);
   const settings = useSettings();
 
-  // Alarma SOSTENIDA: mientras el estado esté CONFIRMADO (sostenido > umbral, P3),
-  // suena/vibra fuerte y repetido hasta que el conductor reaccione (vuelve a Alert).
+  // mientras el estado confirmado no sea Alert, suena y vibra hasta que el conductor reaccione
   useEffect(() => {
     if (running && connected && confirmed && display.state !== "Alert") {
       startAlarm(display.state, settings.sound, settings.haptics, settings.testMode && settings.daveVoice);
@@ -54,7 +52,7 @@ export default function Conductor() {
     settings.daveVoice,
   ]);
 
-  // Dispositivos (cámara/RPi) disponibles — para la pill antes de iniciar el viaje.
+  // dispositivos (camara/RPi) disponibles para la pill antes de iniciar el viaje
   const [devices, setDevices] = useState<{ name: string; kind: string }[]>([]);
   useEffect(() => {
     let alive = true;
@@ -71,8 +69,7 @@ export default function Conductor() {
     };
   }, []);
 
-  // GPS REAL del celular → POST /track mientras el viaje está activo (el celular
-  // es la fuente de ubicación/velocidad; el backend ubica los incidentes en esta ruta).
+  // el celular envia su GPS a POST /track mientras el viaje esta activo; el backend ubica los incidentes sobre esa ruta
   useEffect(() => {
     if (!running || !sessionId || DEMO || !("geolocation" in navigator)) return;
     let lastPost = 0;

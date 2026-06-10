@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
 
-"""
-03_train_model.py — Train DriverStateNet (Bi-LSTM + Attention) on extracted features.
-
-Pipeline:
-  1. Load train/val split CSVs
-  2. Read feature .parquet files, create sliding windows (seq_len=90, stride=15)
-  3. Compute class weights from training distribution
-  4. Train with AdamW + OneCycleLR + AMP + early stopping
-  5. TensorBoard logging, checkpoint best model by val macro F1
-
-Usage:
-    python scripts/03_train_model.py --config config/config.yaml
-    python scripts/03_train_model.py --config config/config.yaml --epochs 100 --batch-size 512
-"""
+"""train DriverStateNet on windowed feature parquets."""
 
 from __future__ import annotations
 
@@ -30,7 +17,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.metrics import classification_report, f1_score
+from sklearn.metrics import f1_score
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -38,13 +25,12 @@ from tqdm import tqdm
 
 import yaml
 
-# Project imports
+# put project root on sys.path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.model import DriverStateNet  # noqa: E402
-from src.dataset import DriverStateDataset  # noqa: E402
 
 logger = logging.getLogger("dms.train")
 
@@ -69,14 +55,14 @@ NUM_FEATURES = len(FEATURE_COLS)  # 18
 
 def _setup_logging(level: str = "INFO") -> None:
     numeric = getattr(logging, level.upper(), logging.INFO)
-    fmt = "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s"
+    fmt = "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s"
     logging.basicConfig(level=numeric, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
 def _load_config(path: str) -> Dict[str, Any]:
     cfg_path = Path(path)
     if not cfg_path.exists():
-        logger.warning("Config %s not found — using defaults.", path)
+        logger.warning("config %s not found, using defaults", path)
         return {}
     with open(cfg_path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
@@ -85,10 +71,7 @@ def _load_config(path: str) -> Dict[str, Any]:
 # Sliding-window dataset
 
 class SlidingWindowDataset(Dataset):
-    """Create overlapping sliding windows from feature .parquet files.
-
-    Each sample is a (seq_len, n_features) tensor with a majority-vote label.
-    """
+    """sliding windows over feature parquets, majority-vote label per window."""
 
     def __init__(
         self,
@@ -108,7 +91,6 @@ class SlidingWindowDataset(Dataset):
         self._load_from_split(split_csv)
 
     def _load_from_split(self, split_csv: Path) -> None:
-        """Read split CSV, load parquet files, create sliding windows."""
         split_df = pd.read_csv(split_csv)
         feature_files = split_df["feature_file"].tolist()
 
@@ -124,25 +106,19 @@ class SlidingWindowDataset(Dataset):
                 logger.warning("Cannot read %s: %s", fpath, exc)
                 continue
 
-            # Ensure all feature columns are present
             missing = [c for c in self.feature_cols if c not in df.columns]
             if missing:
-                logger.warning("Missing columns in %s: %s — skipping.", fpath, missing)
+                logger.warning("missing columns in %s: %s, skipping", fpath, missing)
                 continue
 
             features = df[self.feature_cols].values.astype(np.float32)
             labels_str = df["label"].values
 
-            # Replace NaN with 0
             features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
-
-            # Map labels to ints
             labels_int = np.array([self.label_map.get(l, 0) for l in labels_str], dtype=np.int64)
 
-            # Create sliding windows
             n = len(features)
             if n < self.seq_len:
-                # Pad short sequences
                 pad_len = self.seq_len - n
                 features = np.pad(features, ((0, pad_len), (0, 0)), mode="edge")
                 labels_int = np.pad(labels_int, (0, pad_len), mode="edge")
@@ -153,7 +129,6 @@ class SlidingWindowDataset(Dataset):
                 window_features = features[start:end]
                 window_labels = labels_int[start:end]
 
-                # Majority vote for window label
                 counts = Counter(window_labels)
                 label = counts.most_common(1)[0][0]
 
@@ -200,7 +175,6 @@ def train_one_epoch(
     device: torch.device,
     epoch: int,
 ) -> Dict[str, float]:
-    """Train for one epoch.  Returns dict of metrics."""
     model.train()
     total_loss = 0.0
     correct = 0
@@ -261,7 +235,6 @@ def validate(
     device: torch.device,
     epoch: int,
 ) -> Dict[str, float]:
-    """Evaluate model on validation set.  Returns dict of metrics."""
     model.eval()
     total_loss = 0.0
     correct = 0
@@ -356,7 +329,7 @@ def main() -> None:
 
     for p in [train_csv, val_csv]:
         if not p.exists():
-            logger.error("Split file not found: %s — run 02_build_splits.py first.", p)
+            logger.error("split file not found: %s, run 02_build_splits.py first", p)
             sys.exit(1)
 
     # Reproducibility
@@ -369,9 +342,9 @@ def main() -> None:
     logger.info("Device: %s", device)
 
     # Datasets & DataLoaders
-    logger.info("Loading training data…")
+    logger.info("loading training data")
     train_dataset = SlidingWindowDataset(train_csv, seq_len=seq_len, stride=stride)
-    logger.info("Loading validation data…")
+    logger.info("loading validation data")
     val_dataset = SlidingWindowDataset(val_csv, seq_len=seq_len, stride=stride)
 
     if len(train_dataset) == 0:
@@ -462,7 +435,7 @@ def main() -> None:
 
     logger.info("")
     logger.info("=" * 70)
-    logger.info("TRAINING START — %d epochs, batch=%d, lr=%.1e, device=%s",
+    logger.info("training start: %d epochs, batch=%d, lr=%.1e, device=%s",
                 epochs, batch_size, lr, device)
     logger.info("=" * 70)
 
@@ -482,8 +455,8 @@ def main() -> None:
 
         # Logging
         logger.info(
-            "Epoch %3d/%d │ train loss=%.4f acc=%.3f F1=%.3f │ "
-            "val loss=%.4f acc=%.3f F1=%.3f │ lr=%.2e │ %.1fs",
+            "Epoch %3d/%d | train loss=%.4f acc=%.3f F1=%.3f | "
+            "val loss=%.4f acc=%.3f F1=%.3f | lr=%.2e | %.1fs",
             epoch + 1, epochs,
             train_metrics["loss"], train_metrics["accuracy"], train_metrics["macro_f1"],
             val_metrics["loss"], val_metrics["accuracy"], val_metrics["macro_f1"],
@@ -529,7 +502,7 @@ def main() -> None:
             }
             best_path = models_dir / "best_model.pt"
             torch.save(checkpoint, best_path)
-            logger.info("  ★ New best model saved (F1=%.4f) → %s", best_val_f1, best_path)
+            logger.info("  new best model saved (F1=%.4f) -> %s", best_val_f1, best_path)
         else:
             patience_counter += 1
             if patience_counter >= patience:

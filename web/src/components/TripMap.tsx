@@ -3,17 +3,14 @@ import maplibregl from "maplibre-gl";
 import { MapPinned, MapPin } from "lucide-react";
 import type { Incident, TrackPoint } from "@/lib/types";
 import { NO_SIGNAL, STATE_COLOR, stateLabel, eventLabel } from "@/lib/stateColors";
-import { useTheme, type Theme } from "@/lib/theme";
-import { pick, useLang, type Lang } from "@/lib/i18n";
+import { useTheme, type Theme, pick, useLang } from "@/lib/prefs";
 
 const STYLE_URL: Record<Theme, string> = {
   dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
   light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
 };
 
-// Achromatic chrome hex per theme (MapLibre paint props can't take Tailwind
-// token classes). The route is ink/white in dark, dark ink in light — never
-// cyan. The only color on the map is an incident marker.
+// Hex acromatico por tema; el unico color en el mapa es el marcador de incidente.
 const THEME_HEX: Record<Theme, { route: string; casing: string; halo: string; od: string }> = {
   dark: { route: "#F2F4F7", casing: "#0B0C0F", halo: "rgba(11,12,15,.85)", od: "#F2F4F7" },
   light: { route: "#16181D", casing: "#FFFFFF", halo: "rgba(255,255,255,.92)", od: "#16181D" },
@@ -29,8 +26,7 @@ function escapeHtml(s: string): string {
   );
 }
 
-// Endpoint markers (origin / destination) — visually distinct from the round
-// incident dots: a hollow ring for the start, a filled teardrop pin for the end.
+// Marcadores de origen y destino, distintos de los puntos de incidente.
 function originEl(ink: string, halo: string): HTMLDivElement {
   const el = document.createElement("div");
   el.style.cssText =
@@ -40,7 +36,7 @@ function originEl(ink: string, halo: string): HTMLDivElement {
 }
 function destEl(ink: string, halo: string): HTMLDivElement {
   const el = document.createElement("div");
-  // Teardrop: a rounded square rotated 45° with one sharp corner pointing down.
+  // Gota: cuadrado redondeado rotado 45 con una punta hacia abajo.
   el.style.cssText =
     `width:16px;height:16px;background:${ink};` +
     `border-radius:50% 50% 50% 0;transform:rotate(45deg);` +
@@ -63,14 +59,12 @@ export function TripMap({
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
-  // Incident markers keyed by id so click-to-zoom can open the right popup.
+  // Marcadores de incidente por id para que el zoom abra el popup correcto.
   const incidentMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  // Create the map. Re-created when the theme flips so the base style (dark-matter
-  // vs positron) and the achromatic route swap cleanly. Data updates live in a
-  // separate effect so polling an active trip refreshes the route in place.
+  // Crea el mapa; se recrea al cambiar de tema para intercambiar estilo y ruta.
   useEffect(() => {
     if (!container.current) return;
     setReady(false);
@@ -95,11 +89,11 @@ export function TripMap({
     const onLoad = () => {
       map.addSource("route", {
         type: "geojson",
-        // lineMetrics lets the main line carry a progress gradient along its length.
+        // lineMetrics permite el gradiente de progreso a lo largo de la linea.
         lineMetrics: true,
         data: { type: "FeatureCollection", features: [] },
       });
-      // Casing: wide, low-opacity stroke that reads as a soft glow / outline.
+      // Contorno ancho de baja opacidad que da un glow suave.
       map.addLayer({
         id: "route-casing",
         type: "line",
@@ -107,8 +101,7 @@ export function TripMap({
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": ink.casing, "line-width": 9, "line-opacity": 0.55, "line-blur": 1 },
       });
-      // Main line: achromatic ink with a subtle fade-in along its progress so the
-      // start is faint and the head is crisp — premium without introducing color.
+      // Linea principal acromatica con fade-in segun el progreso.
       map.addLayer({
         id: "route",
         type: "line",
@@ -132,8 +125,7 @@ export function TripMap({
       setReady(true);
     };
 
-    // If the tile CDN / style fails to load, surface a visible fallback instead
-    // of a blank canvas. Style/source errors are the demo killer.
+    // Si el estilo/CDN falla, muestra un fallback visible en vez de un lienzo vacio.
     const onError = (e: { error?: { message?: string } }) => {
       if (!map.isStyleLoaded()) setFailed(true);
       console.warn("MapLibre error:", e?.error?.message ?? e);
@@ -153,8 +145,7 @@ export function TripMap({
     };
   }, [theme]);
 
-  // Update route geometry, markers and viewport whenever data (or language, for
-  // popup text) changes.
+  // Actualiza geometria, marcadores y viewport al cambiar los datos o el idioma.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || failed) return;
@@ -171,12 +162,12 @@ export function TripMap({
       geometry: { type: "LineString", coordinates: coords },
     });
 
-    // Refresh all markers (endpoints + incidents).
+    // Refresca todos los marcadores (extremos e incidentes).
     for (const m of markersRef.current) m.remove();
     markersRef.current = [];
     incidentMarkersRef.current.clear();
 
-    // Origin / destination endpoints of the route.
+    // Extremos de origen y destino de la ruta.
     if (coords.length > 0) {
       const start = coords[0];
       const end = coords[coords.length - 1];
@@ -191,12 +182,12 @@ export function TripMap({
         )
         .addTo(map);
       markersRef.current.push(startMarker);
-      // Only draw a separate destination pin if it's meaningfully apart from origin.
+      // Solo dibuja el pin de destino si esta lejos del origen.
       const apart = Math.abs(end[0] - start[0]) > 1e-6 || Math.abs(end[1] - start[1]) > 1e-6;
       if (apart) {
         const endMarker = new maplibregl.Marker({
           element: destEl(ink.od, ink.halo),
-          // Compensate the 45° rotation so the popup anchors above the tip.
+          // Compensa la rotacion de 45 para anclar el popup sobre la punta.
           offset: [0, -6],
         })
           .setLngLat(end)
@@ -212,7 +203,7 @@ export function TripMap({
       }
     }
 
-    // Incident markers — the only color on the map.
+    // Marcadores de incidente: el unico color del mapa.
     for (const inc of incidents) {
       if (inc.lat == null || inc.lng == null) continue;
       if (!Number.isFinite(inc.lng) || !Number.isFinite(inc.lat)) continue;
@@ -240,8 +231,7 @@ export function TripMap({
       incidentMarkersRef.current.set(inc.id, marker);
     }
 
-    // Fit to the route. Guard the degenerate cases (no points / a single point
-    // / every point identical) where fitBounds would throw or zoom to absurdity.
+    // Ajusta a la ruta; protege los casos degenerados (sin puntos o todos iguales).
     if (coords.length === 0) return;
     const lons = coords.map((c) => c[0]);
     const lats = coords.map((c) => c[1]);
@@ -261,11 +251,10 @@ export function TripMap({
         { padding: 56, duration: 0, maxZoom: 15 },
       );
     }
-    // lang is intentionally a dep so popups re-render in the active language.
+    // lang es dep a proposito para re-renderizar los popups en el idioma activo.
   }, [track, incidents, ready, failed, theme, lang, t]);
 
-  // Click-to-zoom: when the parent focuses an incident, fly to it and open its
-  // popup. Runs after the data effect has (re)built the marker map.
+  // Al enfocar un incidente desde el padre, vuela a el y abre su popup.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || failed || !focusedIncidentId) return;

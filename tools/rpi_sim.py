@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""
-Simulador del lado RPi: postea a la API del DMS lo que mandara el dispositivo real.
-Sirve como (a) prueba del pipeline end-to-end contra AWS y (b) cliente de referencia
-para el equipo de hardware.
-
-Uso:
-    python rpi_sim.py                 # burst: un viaje completo y lo cierra
-    python rpi_sim.py --mode live     # mantiene un viaje activo posteando en vivo
-    python rpi_sim.py --base http://localhost:8000   # otro endpoint
-
-Solo usa la librería estándar (urllib), sin dependencias.
-"""
+"""Simula el lado RPi posteando a la API del DMS; solo usa la libreria estandar."""
 from __future__ import annotations
 
 import argparse

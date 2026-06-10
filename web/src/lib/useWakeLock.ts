@@ -21,7 +21,7 @@ export function useWakeLock(active: boolean) {
         }
         sentinel = next;
       } catch {
-        /* user denied or not allowed; ignore */
+        /* el usuario lo nego o no esta permitido; ignorar */
       }
     };
 

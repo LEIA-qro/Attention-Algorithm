@@ -1,23 +1,6 @@
-"""
-dataset.py — Sliding-Window Dataset & DataLoader Utilities for DMS
-===================================================================
+"""sliding-window dataset over the feature parquet files, plus collate and dataloader helpers.
 
-Provides :class:`DriverStateDataset`, a PyTorch ``Dataset`` that:
-
-1. Loads pre-extracted features from ``.parquet`` files.
-2. Creates sliding windows (default seq_len=90, stride=15).
-3. Assigns each window a label via majority vote of frame-level labels.
-4. Maps string labels → integer class indices.
-
-Also provides :func:`dms_collate_fn` (handles variable-length edge cases)
-and :func:`create_dataloaders` which builds train / val / test loaders
-from a directory of parquet files.
-
-Public API
-----------
-- ``DriverStateDataset``
-- ``dms_collate_fn``
-- ``create_dataloaders``
+window label = majority vote of frame labels; string labels mapped to int class indices.
 """
 
 from __future__ import annotations
@@ -25,22 +8,16 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
 
-__all__ = [
-    "DriverStateDataset",
-    "dms_collate_fn",
-    "create_dataloaders",
-]
-
 logger = logging.getLogger(__name__)
 
-# Canonical feature order — MUST match features.py FEATURE_NAMES
+# standard feature order, must match features.py FEATURE_NAMES
 FEATURE_COLUMNS: List[str] = [
     "ear_left",
     "ear_right",
@@ -71,29 +48,9 @@ DEFAULT_CLASS_MAP: Dict[str, int] = {
 
 
 class DriverStateDataset(Dataset):
-    """Sliding-window dataset built from parquet feature files.
+    """sliding-window dataset over parquet feature files; window label = majority vote.
 
-    Each ``.parquet`` file must contain columns matching
-    ``FEATURE_COLUMNS`` plus a ``"label"`` column (string class names).
-    Optionally a ``"subject_id"`` column for per-subject splitting.
-
-    Parameters
-    ----------
-    parquet_paths : list of str or Path
-        Paths to ``.parquet`` feature files.
-    seq_len : int
-        Number of frames per sliding window (default 90).
-    stride : int
-        Stride between consecutive windows (default 15).
-    class_map : dict, optional
-        ``{class_name: int}``. Defaults to ``DEFAULT_CLASS_MAP``.
-    feature_columns : list of str, optional
-        Subset / reorder of feature columns to use.
-    label_column : str
-        Column name containing string labels, default ``"label"``.
-    normalise : bool
-        If True, z-score normalise each feature column across the
-        entire loaded dataset. Default True.
+    each file needs the FEATURE_COLUMNS plus a string "label" column.
     """
 
     def __init__(
@@ -114,7 +71,7 @@ class DriverStateDataset(Dataset):
         self.label_column = label_column
         self.normalise = normalise
 
-        # ── Load & concatenate all parquet files ──────────────────
+        # load and concat parquet files
         dfs: List[pd.DataFrame] = []
         for p in parquet_paths:
             p = Path(p)
@@ -122,7 +79,6 @@ class DriverStateDataset(Dataset):
                 logger.warning("Parquet file not found, skipping: %s", p)
                 continue
             df = pd.read_parquet(p)
-            # Validate required columns
             missing = set(self.feature_columns) - set(df.columns)
             if missing:
                 raise ValueError(
@@ -145,7 +101,7 @@ class DriverStateDataset(Dataset):
             "Total frames loaded: %d from %d files", len(self._df), len(dfs)
         )
 
-        # ── Map string labels → integers ─────────────────────────
+        # map string labels to ints
         self._df["_label_int"] = self._df[self.label_column].map(self.class_map)
         unmapped = self._df["_label_int"].isna()
         if unmapped.any():
@@ -158,25 +114,24 @@ class DriverStateDataset(Dataset):
             self._df = self._df[~unmapped].reset_index(drop=True)
         self._df["_label_int"] = self._df["_label_int"].astype(int)
 
-        # ── Extract feature matrix and label vector ───────────────
         self._features = self._df[self.feature_columns].values.astype(
             np.float32
         )
         self._labels = self._df["_label_int"].values.astype(np.int64)
 
-        # ── Optional z-score normalisation ────────────────────────
+        # z-score normalize
         self._mean: Optional[np.ndarray] = None
         self._std: Optional[np.ndarray] = None
         if self.normalise:
             self._mean = self._features.mean(axis=0)
             self._std = self._features.std(axis=0)
             # Avoid division by zero for constant features
+            # avoid divide-by-zero on constant features
             self._std[self._std < 1e-8] = 1.0
             self._features = (self._features - self._mean) / self._std
             logger.info("Feature z-score normalisation applied")
 
-        # ── Build window index list ───────────────────────────────
-        # Each entry is (start_frame, end_frame)
+        # each entry is (start, end)
         n_frames = len(self._features)
         self._windows: List[Tuple[int, int]] = []
         for start in range(0, n_frames - seq_len + 1, stride):
@@ -188,13 +143,12 @@ class DriverStateDataset(Dataset):
             stride,
         )
 
-        # ── Pre-compute per-window majority labels ────────────────
+        # majority label per window
         self._window_labels = np.empty(len(self._windows), dtype=np.int64)
         for i, (s, e) in enumerate(self._windows):
             counter = Counter(self._labels[s:e].tolist())
             self._window_labels[i] = counter.most_common(1)[0][0]
 
-        # Log class distribution
         unique, counts = np.unique(self._window_labels, return_counts=True)
         inv_map = {v: k for k, v in self.class_map.items()}
         dist_str = ", ".join(
@@ -202,52 +156,37 @@ class DriverStateDataset(Dataset):
         )
         logger.info("Window label distribution: %s", dist_str)
 
-    # Dataset interface
-
     def __len__(self) -> int:
         return len(self._windows)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return ``(features, label)`` for window ``idx``.
-
-        Returns
-        -------
-        features : Tensor, shape (seq_len, num_features)
-        label : Tensor, scalar int64
-        """
+        """features (seq_len, D) and majority label for window idx."""
         start, end = self._windows[idx]
         feats = torch.from_numpy(self._features[start:end].copy())
         label = torch.tensor(self._window_labels[idx], dtype=torch.long)
         return feats, label
 
-    # Helpers
-
     @property
     def num_features(self) -> int:
-        """Number of feature dimensions."""
         return len(self.feature_columns)
 
     @property
     def num_classes(self) -> int:
-        """Number of distinct classes."""
         return len(self.class_map)
 
     @property
     def class_names(self) -> List[str]:
-        """Ordered list of class names (sorted by integer index)."""
+        # sorted by class index
         return [k for k, _ in sorted(self.class_map.items(), key=lambda kv: kv[1])]
 
     def get_normalisation_stats(self) -> Optional[Dict[str, np.ndarray]]:
-        """Return mean/std used for normalisation (None if disabled)."""
+        """mean/std used for normalisation, None if disabled."""
         if self._mean is None:
             return None
         return {"mean": self._mean, "std": self._std}
 
     def get_sample_weights(self) -> torch.Tensor:
-        """Per-sample weights inversely proportional to class frequency.
-
-        Use with ``WeightedRandomSampler`` for class-balanced training.
-        """
+        """per-sample weights inverse to class frequency, for WeightedRandomSampler."""
         unique, counts = np.unique(self._window_labels, return_counts=True)
         class_weights = 1.0 / counts.astype(np.float64)
         weight_map = {cls: w for cls, w in zip(unique, class_weights)}
@@ -257,39 +196,20 @@ class DriverStateDataset(Dataset):
         return torch.from_numpy(sample_weights)
 
 
-# Collate function
-
 def dms_collate_fn(
     batch: List[Tuple[torch.Tensor, torch.Tensor]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Custom collate that stacks features and labels.
-
-    Handles the (unlikely) case where windows have different lengths by
-    right-padding with zeros.
-
-    Parameters
-    ----------
-    batch : list of (features, label)
-        Each ``features`` has shape ``(T_i, D)``; ``label`` is scalar.
-
-    Returns
-    -------
-    features : Tensor, shape (B, T_max, D)
-    labels : Tensor, shape (B,)
-    """
+    """stack windows into (B, T, D); right-pad with zeros if lengths differ."""
     features_list = [item[0] for item in batch]
     labels_list = [item[1] for item in batch]
 
-    # Check if all sequences are the same length (common case)
     lengths = [f.size(0) for f in features_list]
     max_len = max(lengths)
     feat_dim = features_list[0].size(1)
 
     if all(l == max_len for l in lengths):
-        # Fast path: no padding needed
         features = torch.stack(features_list, dim=0)
     else:
-        # Pad shorter sequences
         features = torch.zeros(len(batch), max_len, feat_dim)
         for i, f in enumerate(features_list):
             features[i, : f.size(0), :] = f
@@ -297,8 +217,6 @@ def dms_collate_fn(
     labels = torch.stack(labels_list, dim=0)
     return features, labels
 
-
-# DataLoader factory
 
 def create_dataloaders(
     features_dir: Union[str, Path],
@@ -314,36 +232,7 @@ def create_dataloaders(
     balanced_sampling: bool = True,
     seed: int = 42,
 ) -> Dict[str, DataLoader]:
-    """Create train / val / test DataLoaders from a directory of parquets.
-
-    Parameters
-    ----------
-    features_dir : str or Path
-        Directory containing ``.parquet`` feature files.
-    seq_len, stride : int
-        Sliding window parameters.
-    batch_size : int
-        Batch size for all loaders.
-    num_workers : int
-        DataLoader workers.
-    pin_memory : bool
-        Pin memory for GPU transfer.
-    train_ratio, val_ratio : float
-        Split ratios; test = 1 - train - val.
-    class_map : dict, optional
-        String → int class mapping.
-    normalise : bool
-        Z-score normalise features.
-    balanced_sampling : bool
-        Use WeightedRandomSampler for training.
-    seed : int
-        Random seed for reproducible splits.
-
-    Returns
-    -------
-    dict
-        ``{"train": DataLoader, "val": DataLoader, "test": DataLoader}``
-    """
+    """build train/val/test loaders from a dir of parquet files; test = 1 - train - val."""
     features_dir = Path(features_dir)
     parquet_files = sorted(features_dir.glob("*.parquet"))
     if not parquet_files:
@@ -355,7 +244,6 @@ def create_dataloaders(
         "Found %d parquet files in %s", len(parquet_files), features_dir
     )
 
-    # Build full dataset
     dataset = DriverStateDataset(
         parquet_paths=parquet_files,
         seq_len=seq_len,
@@ -364,7 +252,7 @@ def create_dataloaders(
         normalise=normalise,
     )
 
-    # Random split
+    # shuffle and split
     n = len(dataset)
     rng = np.random.RandomState(seed)
     indices = rng.permutation(n)
@@ -383,7 +271,6 @@ def create_dataloaders(
     val_set = Subset(dataset, val_idx)
     test_set = Subset(dataset, test_idx)
 
-    # Weighted sampler for balanced training
     train_sampler = None
     shuffle_train = True
     if balanced_sampling:
@@ -394,7 +281,7 @@ def create_dataloaders(
             num_samples=len(train_idx),
             replacement=True,
         )
-        shuffle_train = False  # Sampler handles shuffling
+        shuffle_train = False  # sampler handles shuffling
 
     loaders = {
         "train": DataLoader(

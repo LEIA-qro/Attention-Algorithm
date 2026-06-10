@@ -1,5 +1,5 @@
 import type { DriverState } from "./types";
-import type { Lang } from "./i18n";
+import { type Lang } from "./prefs";
 
 export const STATE_COLOR: Record<DriverState, string> = {
   Alert: "#2DD4BF",

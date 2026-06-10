@@ -8,12 +8,9 @@ import {
   YAxis,
 } from "recharts";
 import type { TrackPoint } from "@/lib/types";
-import { useTheme } from "@/lib/theme";
-import { pick, useLang } from "@/lib/i18n";
+import { useTheme, pick, useLang } from "@/lib/prefs";
 
-// Recharts renders SVG and ignores Tailwind token classes, so the chrome hex is
-// read from the active theme by hand. Achromatic ink only — never cyan; the only
-// saturated color in the app is the driver state.
+// Recharts pinta SVG e ignora las clases de Tailwind, asi que el hex se lee del tema a mano
 const THEME_HEX = {
   dark: {
     panel: "#14161B",
@@ -39,8 +36,7 @@ export function SpeedChart({ track }: { track: TrackPoint[] }) {
   const t = pick(lang);
   const c = THEME_HEX[theme];
 
-  // Keep nulls as nulls (never coerce to 0 — a fake 0 km/h reads as "stopped"
-  // and distorts the line). connectNulls bridges the gaps visually.
+  // mantener null como null: un 0 falso se leeria como "detenido" y distorsiona la linea
   const data = track.map((p) => ({
     t: new Date(p.ts).toLocaleTimeString(lang === "en" ? "en-US" : "es-MX", {
       hour: "2-digit",

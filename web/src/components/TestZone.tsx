@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { api } from "@/lib/api";
-import { pick, type Lang } from "@/lib/i18n";
+import { pick, type Lang } from "@/lib/prefs";
 import { stateLabel } from "@/lib/stateColors";
 import type { DriverState } from "@/lib/types";
 
-// Zona de pruebas (solo con testMode): simula al edge para validar la app en vivo
-// sin cámara. "Forzar estado" postea ese estado cada 1s -> sostiene -> dispara la
-// confirmación (P3) y la alarma. "Disparar evento" postea un incidente puntual.
+// Zona de pruebas: simula al edge sin cámara para validar la app en vivo.
 const STATES: DriverState[] = ["Alert", "Drowsy", "Distracted"];
 
 const EVENTS: { evt: string; state: DriverState; es: string; en: string }[] = [
@@ -30,8 +28,7 @@ export function TestZone({ sessionId, lang }: { sessionId: string; lang: Lang })
         .postState(sessionId, { ts: new Date().toISOString(), state: forced, confidence: 0.95 })
         .catch(() => undefined);
     postOne();
-    // ~400ms: granularidad fina para que el umbral (P3) se cumpla cerca de su valor
-    // real y no se tope con el espaciado de 1s de las muestras.
+    // ~400ms para que el umbral se cumpla cerca de su valor real.
     const id = window.setInterval(() => alive && postOne(), 400);
     return () => {
       alive = false;
