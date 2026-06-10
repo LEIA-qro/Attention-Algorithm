@@ -1,50 +1,38 @@
-# ==============================================================================
-# Driver Monitoring System (DMS) - Training Pipeline Dependencies
-# ==============================================================================
-# Install: pip install -r requirements.txt
-# GPU Note: For CUDA support, install PyTorch separately first via
-#   https://pytorch.org/get-started/locally/
-# ==============================================================================
+# DMS training pipeline deps.
+# For CUDA, install PyTorch first: https://pytorch.org/get-started/locally/
 
-# --- Core ML / Deep Learning ---
+# deep learning
 torch>=2.1
 torchvision>=0.16
 
-# --- Computer Vision & Face Analysis ---
+# vision / face
 mediapipe>=0.10.9
 opencv-python>=4.8
 ultralytics>=8.0.0
 
-# --- Scientific Computing ---
+# scientific computing
 numpy>=1.24
 scipy>=1.11
 pandas>=2.0
 pyarrow>=14.0
 
-# --- Machine Learning Utilities ---
 scikit-learn>=1.3
 
-# --- Visualization ---
+# plotting
 matplotlib>=3.7
 seaborn>=0.13
 
-# --- Experiment Tracking ---
 tensorboard>=2.14
 
-# --- Model Export ---
+# model export
 onnx>=1.15
 onnxruntime>=1.16.0
 onnxruntime-gpu>=1.16
 
-# --- Utilities ---
 tqdm>=4.66
 pyyaml>=6.0
-
-# --- Testing ---
 pytest>=7.0.0
-
-# --- Optional: Audio/Video playback for demos ---
 pygame>=2.5
 
-# --- Web Dashboard ---
+# web dashboard
 Flask>=2.0

@@ -1,5 +1,5 @@
 
-# Driver Monitoring System (DMS) - Master Configuration
+# Driver monitoring system config
 
 # Override any value via environment variable: DMS__SECTION__KEY
 

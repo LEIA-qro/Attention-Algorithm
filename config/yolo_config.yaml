@@ -1,17 +1,15 @@
-# config/yolo_config.yaml
 # YOLOv8n configuration for the surveillance pipeline.
 
 yolo:
-  # --- AI Models ---
   # yolov8s.pt (Small) for better accuracy
   model_path: "yolov8s.pt"
   device: "cuda"
 
-  # --- Person detection (Layer 1) ---
+  # person detection
   person_conf_thresh: 0.80
   person_class_id: 0
 
-  # --- Driver isolation heuristics ---
+  # driver isolation
   # "left"  = driver is leftmost person (LHD: USA, Mexico, Europe)
   # "right" = driver is rightmost person (RHD: UK, Japan, Australia)
   drive_side: "left"
@@ -25,7 +23,7 @@ yolo:
   iou_track_thresh: 0.40
   redetect_every_n_frames: 30
 
-  # --- Object detection (Layer 3) ---
+  # object detection
   object_conf_thresh: 0.15
   roi_padding_px: 150
   imgsz: 640
