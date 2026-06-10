@@ -6,7 +6,7 @@ inference thread runs the pipeline on downscaled frames, and Flask serves an
 MJPEG /video_feed plus an SSE /telemetry_feed. The independent camera thread
 keeps the video stream from being bottlenecked by AI processing.
 
-Run with: python scripts/10_web_dashboard.py --source 0 --selfie
+Run with: python scripts/web_dashboard.py --source 0 --selfie
 """
 
 from __future__ import annotations
@@ -48,32 +48,34 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Driver Monitoring System</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-    --bg-primary: #0a0a0f;
-    --bg-card: rgba(18, 18, 28, 0.85);
-    --bg-card-solid: #12121c;
-    --border: rgba(255, 255, 255, 0.06);
-    --text-primary: #e8e8ed;
-    --text-secondary: #8a8a9a;
-    --text-dim: #5a5a6a;
+    /* app design palette (dark). chrome stays acromatic, only the driver state gets a saturated color. */
+    --bg-primary: #0B0C0F;
+    --bg-card: rgba(20, 22, 27, 0.85);
+    --bg-card-solid: #14161B;
+    --border: #2C313B;
+    --text-primary: #F2F4F7;
+    --text-secondary: #A8B0BD;
+    --text-dim: #6B7480;
+    --accent: #F2F4F7;
 
-    --alert-color: #22c55e;
-    --alert-bg: rgba(34, 197, 94, 0.08);
-    --drowsy-color: #f59e0b;
-    --drowsy-bg: rgba(245, 158, 11, 0.08);
-    --distracted-color: #ef4444;
-    --distracted-bg: rgba(239, 68, 68, 0.08);
+    --alert-color: #2DD4BF;
+    --alert-bg: rgba(45, 212, 191, 0.08);
+    --drowsy-color: #FFB020;
+    --drowsy-bg: rgba(255, 176, 32, 0.08);
+    --distracted-color: #FF6B81;
+    --distracted-bg: rgba(255, 107, 129, 0.08);
 
-    --radius: 12px;
-    --radius-sm: 8px;
+    --radius: 16px;
+    --radius-sm: 12px;
 }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
@@ -149,9 +151,9 @@ body {
     transition: background 0.3s, border-color 0.3s;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
-.state-overlay.alert { background: rgba(34, 197, 94, 0.25); border-color: rgba(34, 197, 94, 0.5); }
-.state-overlay.drowsy { background: rgba(245, 158, 11, 0.25); border-color: rgba(245, 158, 11, 0.5); }
-.state-overlay.distracted { background: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 0.5); }
+.state-overlay.alert { background: rgba(45, 212, 191, 0.22); border-color: rgba(45, 212, 191, 0.5); }
+.state-overlay.drowsy { background: rgba(255, 176, 32, 0.22); border-color: rgba(255, 176, 32, 0.5); }
+.state-overlay.distracted { background: rgba(255, 107, 129, 0.22); border-color: rgba(255, 107, 129, 0.5); }
 
 .state-label {
     font-weight: 800;
@@ -289,12 +291,12 @@ body {
     transform: scale(0.98);
 }
 .btn.danger {
-    color: #ef4444;
-    border-color: rgba(239, 68, 68, 0.3);
+    color: #FF6B81;
+    border-color: rgba(255, 107, 129, 0.3);
 }
 .btn.danger:hover {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(255, 107, 129, 0.1);
+    border-color: rgba(255, 107, 129, 0.5);
 }
 
 /* Objects */
@@ -311,7 +313,7 @@ body {
 }
 .object-tag.phone { background: rgba(251, 146, 60, 0.1); border-color: rgba(251, 146, 60, 0.25); color: #fb923c; }
 .object-tag.food { background: rgba(52, 211, 153, 0.1); border-color: rgba(52, 211, 153, 0.25); color: #34d399; }
-.object-tag.danger { background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.25); color: #ef4444; }
+.object-tag.danger { background: rgba(255, 107, 129, 0.1); border-color: rgba(255, 107, 129, 0.25); color: #FF6B81; }
 .objects-empty { font-size: 12px; color: var(--text-dim); }
 
 /* Events log */
@@ -329,7 +331,7 @@ body {
 }
 .event-dot.phone { background: #fb923c; }
 .event-dot.food { background: #34d399; }
-.event-dot.danger { background: #ef4444; }
+.event-dot.danger { background: #FF6B81; }
 .event-dot.drowsy { background: var(--drowsy-color); }
 .event-dot.distracted { background: var(--distracted-color); }
 .event-dot.eyes_off { background: #a78bfa; }
@@ -362,8 +364,8 @@ body {
     bottom: 30px;
     left: 50%;
     transform: translateX(-50%) translateY(20px);
-    background: rgba(34, 197, 94, 0.9);
-    color: #fff;
+    background: rgba(45, 212, 191, 0.92);
+    color: #0B0C0F;
     padding: 12px 24px;
     border-radius: var(--radius);
     font-weight: 600;
@@ -617,7 +619,7 @@ body {
         const mapY = y => offsetY + (y / aiH) * drawH;
 
         ctx.lineWidth = 2;
-        ctx.font = "bold 14px Inter";
+        ctx.font = "bold 14px 'Space Grotesk', system-ui, sans-serif";
 
         const showBoxes = $('toggle-boxes').checked;
         const preferFace = $('toggle-face').checked;
@@ -627,7 +629,7 @@ body {
         let boxToDraw = preferFace && d.face_box ? d.face_box : d.driver_box;
         if (boxToDraw) {
             const [x1, y1, x2, y2] = boxToDraw;
-            const stateColorsMap = { Alert: '#22c55e', Drowsy: '#f59e0b', Distracted: '#ef4444' };
+            const stateColorsMap = { Alert: '#2DD4BF', Drowsy: '#FFB020', Distracted: '#FF6B81' };
             ctx.strokeStyle = stateColorsMap[d.state] || '#ffffff';
             ctx.strokeRect(mapX(x1), mapY(y1), mapX(x2) - mapX(x1), mapY(y2) - mapY(y1));
             ctx.fillStyle = ctx.strokeStyle;
@@ -637,7 +639,7 @@ body {
         if (d.detected_objects && d.detected_objects.length > 0) {
             d.detected_objects.forEach(obj => {
                 const [x1, y1, x2, y2] = obj.box;
-                const color = obj.label === 'phone' ? '#fb923c' : (obj.label === 'food' ? '#34d399' : '#ef4444');
+                const color = obj.label === 'phone' ? '#fb923c' : (obj.label === 'food' ? '#34d399' : '#FF6B81');
                 ctx.strokeStyle = color;
                 ctx.fillStyle = color;
                 ctx.strokeRect(mapX(x1), mapY(y1), mapX(x2) - mapX(x1), mapY(y2) - mapY(y1));
@@ -838,7 +840,7 @@ def video_feed():
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                 )
-            time.sleep(0.040)  # ~25 fps cap (prevents browser buffer bloat!)
+            time.sleep(0.040)  # about 25 fps cap (prevents browser buffer bloat!)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/api/reset", methods=["POST"])
@@ -939,7 +941,7 @@ def main():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "surveillance_custom",
-        str(_PROJECT_ROOT / "scripts" / "09_surveillance_custom.py"),
+        str(_PROJECT_ROOT / "scripts" / "surveillance_custom.py"),
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

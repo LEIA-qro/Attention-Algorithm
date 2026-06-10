@@ -2,8 +2,8 @@
 """Driver surveillance pipeline: YOLOv8n person/object detection, MediaPipe +
 DriverStateNet state classification, event engine, and clip + CSV/JSON logging.
 
-    python scripts/08_surveillance.py --source 0
-    python scripts/08_surveillance.py --source path/to/video.mp4 --no-display
+    python scripts/surveillance.py --source 0
+    python scripts/surveillance.py --source path/to/video.mp4 --no-display
 """
 
 from __future__ import annotations

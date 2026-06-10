@@ -76,7 +76,7 @@ export default function Conductor() {
     const id = navigator.geolocation.watchPosition(
       (p) => {
         const { latitude, longitude, speed: spd } = p.coords;
-        // El speedometer se actualiza en cada fix; el POST sí va throttled a ~3s.
+        // El speedometer se actualiza en cada fix; el POST sí va throttled a 3s, si no saturamos /track como taquería en quincena.
         setSpeed(spd != null ? Math.max(0, spd * 3.6) : null);
         const now = Date.now();
         if (now - lastPost < 3000) return;

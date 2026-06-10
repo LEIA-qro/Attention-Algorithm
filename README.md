@@ -9,12 +9,11 @@ cloud layer that ingests trips, stores clips, and serves a web dashboard.
 ```
 config/     model and pipeline config (config.yaml, yolo_config.yaml)
 models/     trained weights and landmark assets (.pt, .onnx, .task)
-scripts/    numbered data/train/eval/run pipeline (00 -> 10)
+scripts/    data/train/eval/run pipeline
 src/        edge library: features, detection, model, event engine, clip writer
 api/        FastAPI service (trip ingest, storage, queries)
 tools/      Raspberry Pi runners (rpi_live.py, rpi_sim.py)
 web/        React + Vite dashboard (driver, manager, sensors, trip views)
-research/   design notes and experiments
 ```
 
 ## Edge pipeline
@@ -22,11 +21,11 @@ research/   design notes and experiments
 The `scripts/` are ordered. Data prep and training run first, then export and
 the live runners:
 
-- `00_setup_data` ... `02_build_splits`: dataset prep and splits
-- `03_train_model`, `04_evaluate`: train the driver-state net and evaluate it
-- `05_export_onnx`: export to ONNX for edge inference
-- `06_inference_demo`, `08_surveillance`, `09_surveillance_custom`: live inference
-- `10_web_dashboard`: local dashboard against the edge stream
+- `setup_data` ... `build_splits`: dataset prep and splits
+- `train_model`, `evaluate`: train the driver-state net and evaluate it
+- `export_onnx`: export to ONNX for edge inference
+- `inference_demo`, `surveillance`, `surveillance_custom`: live inference
+- `web_dashboard`: local dashboard against the edge stream
 
 The core logic lives in `src/`: MediaPipe face landmarks and YOLO feed
 `features.py`, the ONNX model in `model.py` scores state, `event_engine.py`
@@ -36,7 +35,7 @@ turns scores into events, and `clip_writer.py` saves the relevant video.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python scripts/06_inference_demo.py
+python scripts/inference_demo.py
 ```
 
 ## Cloud and web

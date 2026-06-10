@@ -266,7 +266,7 @@ def main() -> None:
 
     if not features_dir.exists():
         logger.error("Features directory not found: %s", features_dir)
-        logger.error("Run 01_extract_features.py first.")
+        logger.error("Run extract_features.py first.")
         sys.exit(1)
 
     inventory = build_inventory(features_dir)

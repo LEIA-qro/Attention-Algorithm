@@ -5,8 +5,8 @@ Like 08 but with the custom tracker (selfie mode), the reliable face-loss
 feature extractor, and the clip writer that dedupes contiguous frames and
 burns the HUD onto saved clips.
 
-    python scripts/09_surveillance_custom.py --source 0
-    python scripts/09_surveillance_custom.py --source path/to/video.mp4 --no-display --selfie
+    python scripts/surveillance_custom.py --source 0
+    python scripts/surveillance_custom.py --source path/to/video.mp4 --no-display --selfie
 """
 
 from __future__ import annotations

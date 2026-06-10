@@ -879,7 +879,7 @@ def main() -> None:
                     ds_dir.name, len(parquet_files), total_rows, dict(label_counts),
                 )
 
-    logger.info("Next step: python scripts/02_build_splits.py --config %s", args.config)
+    logger.info("Next step: python scripts/build_splits.py --config %s", args.config)
 
 
 if __name__ == "__main__":

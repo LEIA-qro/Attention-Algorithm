@@ -28,7 +28,7 @@ export function TestZone({ sessionId, lang }: { sessionId: string; lang: Lang })
         .postState(sessionId, { ts: new Date().toISOString(), state: forced, confidence: 0.95 })
         .catch(() => undefined);
     postOne();
-    // ~400ms para que el umbral se cumpla cerca de su valor real.
+    // mas o menos 400ms para que el umbral se cumpla cerca de su valor real.
     const id = window.setInterval(() => alive && postOne(), 400);
     return () => {
       alive = false;

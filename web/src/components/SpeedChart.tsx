@@ -10,7 +10,7 @@ import {
 import type { TrackPoint } from "@/lib/types";
 import { useTheme, pick, useLang } from "@/lib/prefs";
 
-// Recharts pinta SVG e ignora las clases de Tailwind, asi que el hex se lee del tema a mano
+// Recharts pinta SVG e ignora las clases de Tailwind, asi que el hex se lo damos a mano como en los viejos tiempos. ni modo
 const THEME_HEX = {
   dark: {
     panel: "#14161B",
