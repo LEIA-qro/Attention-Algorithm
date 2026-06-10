@@ -308,7 +308,7 @@ def delete_session(session_id: uuid.UUID):
                 s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": batch, "Quiet": True})
             deleted_media = len(keys)
         except Exception:
-            pass  # los objetos huérfanos en S3 son inofensivos; el borrado en BD ya quedó
+            pass  # si S3 truena, ni modo, dejamos los huérfanos juntando polvo. la BD ya quedó limpia, que es lo que importa
     return {"deleted": True, "media_deleted": deleted_media}
 
 

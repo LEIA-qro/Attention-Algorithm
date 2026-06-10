@@ -14,9 +14,9 @@ async function rawSample(
   sessionId: string,
 ): Promise<{ state: DriverState; confidence: number; confirmed: boolean }> {
   if (DEMO) return demoLiveState();
-  // estado continuo (ultimo state_sample que postea la RPi mas o menos 1 vez/s), no los incidentes:
+  // estado continuo (ultimo state_sample que postea la RPi mas o menos 1 vez/s), no los incidentes,
   // estos los dispara el motor de eventos con cooldown, asi que entre disparos la app
-  // se quedaba en "Alerta" aunque siguieras distraido
+  // se quedaba en "Alerta" bien quitada de la pena aunque siguieras viendo el celular
   const r = await api.latestState(sessionId);
   return { state: r.state, confidence: r.confidence, confirmed: r.confirmed };
 }

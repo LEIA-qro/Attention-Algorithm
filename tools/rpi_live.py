@@ -120,9 +120,9 @@ def build_pipeline(repo: Path, selfie: bool, fps: float):
     yolo_cfg = yolo_full.get("yolo", {})
     yolo_cfg["selfie"] = selfie
     dms_cfg.setdefault("features", {})["selfie"] = selfie
-    # fps REAL del procesamiento (no los 30 por default). En external-capture el
+    # fps REAL del procesamiento (no los 30 de mentiritas). En external-capture el
     # pipeline usa features.fps para: (a) escribir los clips MP4 (si no, los graba a
-    # 30fps con frames a mas o menos 9fps y duplica frames de forma inconsistente), (b) las
+    # 30fps con frames a mas o menos 9fps y duplica cuadros tipo flipbook), (b) las
     # ventanas temporales de features (PERCLOS/parpadeo). Matchearlo arregla ambos.
     dms_cfg["features"]["fps"] = fps
 
@@ -179,7 +179,7 @@ def main() -> None:
     ap.add_argument("--name", default=socket.gethostname())
     ap.add_argument("--state-every", type=float, default=0.4)
     ap.add_argument("--fps", type=float, default=9.0,
-                    help="fps real de procesamiento (clips + ventanas temporales). Default 9 (laptop CPU).")
+                    help="fps real de procesamiento (clips + ventanas temporales). Default 9, mi laptop con CPU no da para mas. En la Raspi o en compus con CUDA si jala padre, obvio.")
     ap.add_argument("--seconds", type=float, default=0.0)
     args = ap.parse_args()
 
@@ -307,7 +307,7 @@ def main() -> None:
                 # el directorio: clip nuevo + estable -> subir y asociar al incidente.
                 if (now - last_clip_scan) >= 1.5 and clip_dir.exists():
                     last_clip_scan = now
-                    pending_clips[:] = [p for p in pending_clips if now - p["ts"] < 30.0]
+                    pending_clips[:] = [p for p in pending_clips if now - p["ts"] < 30.0]  # si el clip no aparecio en 30s ya valio, el incidente se queda sin video y seguimos
                     for cp in sorted(clip_dir.glob("*.mp4")):
                         if cp.name in seen_clips:
                             continue
@@ -315,7 +315,7 @@ def main() -> None:
                             st = cp.stat()
                         except OSError:
                             continue
-                        # Estable: el worker async ya terminó de escribir (sin cambios >2s).
+                        # esperamos 2s sin cambios para dar por hecho que el worker ya soltó el archivo, no hay forma decente de saberlo
                         if st.st_size == 0 or (now - st.st_mtime) < 2.0:
                             continue
                         evt_type = clip_event_type(cp)
