@@ -833,8 +833,6 @@ def _inference_thread(pipeline):
                 logger.exception("Cloud uplink error")
 
 
-QRO = (20.5888, -100.3899)
-
 EVENT_TO_STATE = {
     "drowsy": "Drowsy",
     "distracted": "Distracted",
@@ -909,18 +907,16 @@ def _clip_event_type(path):
 
 
 class CloudUplink:
-    def __init__(self, pipeline, base, name, state_every=0.4, fake_gps=False, clip_dir=None):
+    def __init__(self, pipeline, base, name, state_every=0.4, clip_dir=None):
         self.pipeline = pipeline
         self.base = base
         self.name = name
         self.state_every = state_every
-        self.fake_gps = fake_gps
         self.clip_dir = clip_dir
         self.seen_clips = {p.name for p in clip_dir.glob("*.mp4")} if clip_dir and clip_dir.exists() else set()
         self.active_sid = None
-        self.last_poll = self.last_hb = self.last_state = self.last_track = self.last_clip_scan = 0.0
+        self.last_poll = self.last_hb = self.last_state = self.last_clip_scan = 0.0
         self.pending_clips = []
-        self.gps = list(QRO)
         self.rtt = {"ms": 0.0}
 
     def step(self, telemetry, frame):
@@ -944,8 +940,7 @@ class CloudUplink:
             if sid != self.active_sid:
                 if sid:
                     self.active_sid = sid
-                    self.last_state = self.last_track = 0.0
-                    self.gps = list(QRO)
+                    self.last_state = 0.0
                     self.pending_clips.clear()
                     if self.clip_dir and self.clip_dir.exists():
                         self.seen_clips.update(p.name for p in self.clip_dir.glob("*.mp4"))
@@ -968,13 +963,6 @@ class CloudUplink:
                               {"ts": ts, "state": state, "confidence": conf}, self.rtt)
             self.last_state = now
 
-        if self.fake_gps and (now - self.last_track) >= 2.0:
-            self.gps[0] += 0.00018
-            self.gps[1] += 0.00022
-            _cloud_post(self.base, f"/sessions/{self.active_sid}/track",
-                        {"ts": ts, "lat": self.gps[0], "lng": self.gps[1], "speed_kmh": 60})
-            self.last_track = now
-
         for evt in triggers:
             inc_state = EVENT_TO_STATE.get(evt, "Distracted")
             snap_key = None
@@ -984,9 +972,9 @@ class CloudUplink:
             resp = _cloud_post(self.base, f"/sessions/{self.active_sid}/incidents", {
                 "ts": ts, "state": inc_state,
                 "confidence": float(probs.get(inc_state.lower(), conf)) or 0.9,
-                "speed_kmh": 60 if self.fake_gps else None,
-                "lat": self.gps[0] if self.fake_gps else None,
-                "lng": self.gps[1] if self.fake_gps else None,
+                "speed_kmh": None,
+                "lat": None,
+                "lng": None,
                 "snapshot_key": snap_key,
                 "event_type": evt,
                 "harsh_event": False,
@@ -1112,7 +1100,6 @@ def main():
     parser.add_argument("--base", default="https://34-205-126-89.nip.io/api")
     parser.add_argument("--name", default=socket.gethostname())
     parser.add_argument("--state-every", type=float, default=0.4)
-    parser.add_argument("--fake-gps", action="store_true")
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
@@ -1189,8 +1176,7 @@ def main():
         except Exception:
             clip_dir = _PROJECT_ROOT / "output" / "clips"
         _cloud = CloudUplink(pipeline, args.base, args.name,
-                             state_every=args.state_every, fake_gps=args.fake_gps,
-                             clip_dir=clip_dir)
+                             state_every=args.state_every, clip_dir=clip_dir)
 
     logger.info("=" * 60)
     logger.info("DMS WEB DASHBOARD (Decoupled Architecture)")
