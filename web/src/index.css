@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Chrome acromático con tokens que voltean light/dark. Triplets RGB para que
+   Tailwind soporte opacidad (rgb(var(--x) / <alpha-value>)). El ÚNICO color
+   saturado de la app es el estado del conductor (state.*), nunca el chrome. */
+:root,
+.theme-dark {
+  --canvas: 11 12 15;
+  --panel: 20 22 27;
+  --raised: 30 34 42;
+  --hairline: 44 49 59;
+  --ink-high: 242 244 247;
+  --ink-mid: 168 176 189;
+  --ink-low: 107 116 128;
+  color-scheme: dark;
+}
+
+.light {
+  --canvas: 247 246 243;
+  --panel: 255 255 255;
+  --raised: 238 237 232;
+  --hairline: 220 218 211;
+  --ink-high: 22 24 29;
+  --ink-mid: 88 94 104;
+  --ink-low: 132 138 147;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: rgb(var(--canvas));
+  color: rgb(var(--ink-high));
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Live numerics (km/h, %, lat/lng, timestamps) must not reflow on each poll. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+::selection {
+  background: rgb(var(--ink-high) / 0.18);
+  color: rgb(var(--ink-high));
+}
+
+@keyframes ringPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 30px 0 var(--ring);
+  }
+  50% {
+    box-shadow: 0 0 72px 8px var(--ring);
+  }
+}
+
+@keyframes fadeScale {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgb(var(--ink-high));
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

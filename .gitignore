@@ -1,25 +1,37 @@
-# Environments
+# ===== Entorno / secretos =====
 .env
+.env.*
+!.env.example
 .venv
-env/
+.venv/
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
 
-# Python
+# ===== Python =====
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyc
+*.egg-info/
 
-# Jupyter Notebook
+# ===== Jupyter =====
 .ipynb_checkpoints
 
-# VS Code
-.vscode/
+# ===== Node / build del frontend =====
+node_modules/
+dist/
+*.tsbuildinfo
 
-# Project Specific
+# ===== Editores / OS =====
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ===== Datos / media pesada (no se versiona) =====
 data/
 runs/
 test_videos/
@@ -27,18 +39,15 @@ test_videos/
 *.avi
 *.mkv
 
-# Ignore temporary scripts or logs
-scripts/fix_norm.py
-scratch/
+# ===== Logs / temporales =====
 *.log
+rpi_live_test.log
+scratch/
+scripts/fix_norm.py
 
-# We WANT to track the models because they are very small (< 4MB)
-# So we do NOT ignore the models directory!
-
-# Surveillance output
+# ===== Salida de vigilancia (edge) =====
 output/clips/*.mp4
 output/logs/*.csv
 output/logs/*.json
-/tests
-/docs
-*.md
+
+# Nota: los modelos (models/, *.pt, *.onnx) SI se versionan (son pequenos, <4MB).
