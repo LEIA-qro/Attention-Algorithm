@@ -164,14 +164,14 @@ def _compute_gaze_angles(
     l_h, l_v = _eye_gaze(l_iris, l_inner, l_outer)
     r_h, r_v = _eye_gaze(r_iris, r_inner, r_outer)
 
-    # avg then scale normalised displacement to approx degrees (~30 deg eye span, tunable)
+    # avg then scale normalised displacement to degrees (around 30 deg eye span, tunable)
     scale_h = 60.0  # degrees per full eye-width displacement
     scale_v = 40.0
 
     avg_h = (l_h + r_h) / 2.0
     avg_v = (l_v + r_v) / 2.0
 
-    # centre: iris at midpoint of inner/outer, ratio ~0.5
+    # centre: iris at midpoint of inner/outer, ratio around 0.5
     gaze_yaw = float(np.clip((avg_h - 0.5) * scale_h, -90.0, 90.0))
     gaze_pitch = float(np.clip(avg_v * scale_v, -90.0, 90.0))
 
@@ -184,7 +184,7 @@ def _compute_gaze_angles(
 class _EARCalibration:
     """Stores EAR baseline collected during the first N frames."""
 
-    target_frames: int = 894  # ~30 s at 29.76 fps
+    target_frames: int = 894  # around 30 s at 29.76 fps
     collected: List[float] = field(default_factory=list)
     baseline: Optional[float] = None
     is_calibrated: bool = False

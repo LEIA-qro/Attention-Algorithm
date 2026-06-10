@@ -838,7 +838,7 @@ def video_feed():
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                 )
-            time.sleep(0.040)  # ~25 fps cap (prevents browser buffer bloat!)
+            time.sleep(0.040)  # about 25 fps cap (prevents browser buffer bloat!)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/api/reset", methods=["POST"])

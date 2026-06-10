@@ -623,7 +623,7 @@ class InferenceDemo:
             else:
                 self._distracted_frames = max(0, self._distracted_frames - self.classify_every)
 
-            # Require ~1.5s sustained (45 frames @30fps) so quick shoulder checks don't flash Distracted.
+            # Require roughly 1.5s sustained (45 frames @30fps) so quick shoulder checks don't flash Distracted.
             if self._distracted_frames > 45:
                 state = "Distracted"
                 probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)

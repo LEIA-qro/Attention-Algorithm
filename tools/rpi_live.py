@@ -122,7 +122,7 @@ def build_pipeline(repo: Path, selfie: bool, fps: float):
     dms_cfg.setdefault("features", {})["selfie"] = selfie
     # fps REAL del procesamiento (no los 30 por default). En external-capture el
     # pipeline usa features.fps para: (a) escribir los clips MP4 (si no, los graba a
-    # 30fps con frames a ~9fps y duplica frames de forma inconsistente), (b) las
+    # 30fps con frames a mas o menos 9fps y duplica frames de forma inconsistente), (b) las
     # ventanas temporales de features (PERCLOS/parpadeo). Matchearlo arregla ambos.
     dms_cfg["features"]["fps"] = fps
 
@@ -212,7 +212,7 @@ def main() -> None:
     last_poll = last_hb = last_state_post = last_track_post = last_clip_scan = last_diag = 0.0
     poll_every = 1.0
     state_rtt = {"ms": 0.0}  # último RTT del POST de estado (para diagnóstico)
-    # Incidentes posteados esperando que su clip MP4 cierre (~5s post-evento).
+    # Incidentes posteados esperando que su clip MP4 cierre (como 5s post-evento).
     # Cada uno: {"id", "event_type", "ts"}; correlacionamos por event_type.
     pending_clips: list[dict] = []
     gps = list(QRO)
@@ -303,7 +303,7 @@ def main() -> None:
                         pending_clips.append({"id": inc_id, "event_type": evt, "ts": now})
                     print(f"\n  [!] {evt} -> incidente {inc_state}{' +foto' if snap_key else ''}")
 
-                # El clip MP4 cierra ~5s después del evento (post-buffer). Vigilamos
+                # El clip MP4 cierra mas o menos 5s después del evento (post-buffer). Vigilamos
                 # el directorio: clip nuevo + estable -> subir y asociar al incidente.
                 if (now - last_clip_scan) >= 1.5 and clip_dir.exists():
                     last_clip_scan = now
@@ -345,7 +345,7 @@ def main() -> None:
                 last_diag = now
                 fps = float(tel.get("fps", 0.0))
                 print(f"\n[diag] pipeline {fps:.1f} fps | state cada {args.state_every}s "
-                      f"| post RTT ~{state_rtt['ms']:.0f}ms")
+                      f"| post RTT {state_rtt['ms']:.0f}ms aprox")
 
             tag = f"viaje {active_sid[:8]}" if active_sid else "esperando viaje"
             objs = ",".join(tel.get("objects", {}).keys())

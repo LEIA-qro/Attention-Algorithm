@@ -2,7 +2,7 @@ import type { LiveSample } from "@/lib/useDriverState";
 import { NO_SIGNAL, STATE_COLOR as COLOR } from "@/lib/stateColors";
 import { pick, useLang } from "@/lib/prefs";
 
-const WINDOW = 40; // ~60s a un poll cada 1.5s
+const WINDOW = 40; // unos 60s a un poll cada 1.5s
 
 export function AttentionTrace({
   history,

@@ -357,7 +357,7 @@ def post_incident(session_id: uuid.UUID, body: IncidentIn):
 @app.post("/sessions/{session_id}/incidents/{incident_id}/clip", status_code=202)
 def attach_clip(session_id: uuid.UUID, incident_id: uuid.UUID, body: ClipIn):
     """Asocia un clip de video (ya subido a S3) a un incidente. El edge llama esto
-    después, porque el clip se cierra ~5s tras el evento (post-buffer)."""
+    después, porque el clip se cierra como 5s tras el evento (post-buffer)."""
     with pool.connection() as conn:
         row = conn.execute(
             "UPDATE incidents SET clip_key = %s WHERE id = %s AND session_id = %s RETURNING id",

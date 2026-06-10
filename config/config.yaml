@@ -83,7 +83,7 @@ features:
   # EAR (Eye Aspect Ratio) thresholds
   ear:
     blink_threshold: 0.21            # EAR below this = eye closed
-    calibration_frames: 894          # ~30s at 29.76fps for baseline
+    calibration_frames: 894          # about 30s at 29.76fps for baseline
     calibration_percentile: 50       # Median EAR during calibration
 
   # MAR (Mouth Aspect Ratio) thresholds
