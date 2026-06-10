@@ -2,7 +2,7 @@ import { AlertTriangle, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DriverState } from "@/lib/types";
 import { NO_SIGNAL, STATE_COLOR } from "@/lib/stateColors";
-import { pick, useLang, type Lang } from "@/lib/i18n";
+import { pick, useLang, type Lang } from "@/lib/prefs";
 
 type StateKey = DriverState | "NoSignal";
 
@@ -10,8 +10,7 @@ const META: Record<
   StateKey,
   { es: string; en: string; Icon: LucideIcon; breathe: number | null; spin: boolean }
 > = {
-  // Alert respira lento (vivo, tranquilo). Estados de alerta NO repiten pulso
-  // (la gravedad se lee por color + tamaño + glow fijo, nunca por parpadeo).
+  // Alert respira lento; las alertas usan glow fijo, sin pulso repetido.
   Alert: { es: "ALERTA", en: "ALERT", Icon: ShieldCheck, breathe: 4, spin: false },
   Drowsy: { es: "SOMNOLENCIA", en: "DROWSY", Icon: EyeOff, breathe: null, spin: false },
   Distracted: { es: "DISTRACCIÓN", en: "DISTRACTED", Icon: AlertTriangle, breathe: null, spin: false },
@@ -45,9 +44,7 @@ export function StateRing({
       ? `${label}, ${confidenceLabel} ${Math.round(confidence * 100)}%`
       : label;
 
-  // Calma (Alerta / Sin señal): el anillo respira lento. Estados de alerta:
-  // glow fijo y más intenso, SIN pulso repetido. El color del borde cruza-funde
-  // en 400ms (esconde el jitter del polling). Reduced-motion apaga la animación.
+  // Borde cruza-funde en 400ms para esconder el jitter del polling.
   return (
     <div
       className="flex flex-col items-center gap-8"

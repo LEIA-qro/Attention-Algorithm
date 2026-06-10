@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import type { DriverState, Incident, StateSample } from "@/lib/types";
 import { NO_SIGNAL, STATE_COLOR, stateLabel, eventLabel } from "@/lib/stateColors";
-import { useTheme } from "@/lib/theme";
-import { pick, useLang } from "@/lib/i18n";
+import { useTheme, pick, useLang } from "@/lib/prefs";
 
 function colorFor(state: DriverState): string {
   return STATE_COLOR[state] ?? NO_SIGNAL;
@@ -25,7 +24,7 @@ export function TripRibbon({
   const lang = useLang();
   const t = pick(lang);
   const locale = lang === "en" ? "en-US" : "es-MX";
-  // Achromatic ink for the incident ticks + their halo, per theme.
+  // Tinta acromatica para los ticks de incidente y su halo, por tema.
   const tickInk = theme === "dark" ? "#F2F4F7" : "#16181D";
   const tickHalo = theme === "dark" ? "rgba(11,12,15,.8)" : "rgba(255,255,255,.9)";
 
@@ -36,7 +35,7 @@ export function TripRibbon({
     const end0 = Date.parse(sorted[sorted.length - 1].ts);
     const total = Math.max(end0 - start0, 1);
 
-    // Collapse consecutive same-state samples into runs (never one rect/sample).
+    // Agrupa muestras consecutivas del mismo estado en tramos.
     const out: Run[] = [];
     for (let i = 0; i < sorted.length; i++) {
       const t = Date.parse(sorted[i].ts);
@@ -102,8 +101,7 @@ export function TripRibbon({
               hour: "2-digit",
               minute: "2-digit",
             });
-            // 2nd channel: teal y ámbar tienen luminancia casi igual → textura
-            // diagonal en Somnolencia para distinguirlos bajo glare / acromatopsia.
+            // Textura diagonal en Somnolencia para distinguir teal y ambar bajo glare.
             const stripe =
               r.state === "Drowsy"
                 ? {
@@ -121,7 +119,7 @@ export function TripRibbon({
           })}
         </div>
 
-        {/* Incident ticks aligned to the same time axis. */}
+        {/* Ticks de incidente alineados al mismo eje de tiempo. */}
         {incidents.map((inc) => {
           const pos = ((Date.parse(inc.ts) - t0) / span) * 100;
           if (!Number.isFinite(pos) || pos < 0 || pos > 100) return null;

@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { AlertTriangle, X } from "lucide-react";
 
-// Diálogo de confirmación para acciones destructivas (borrar viaje). Acromático,
-// con el botón de confirmar en coral (state-distracted) para señalar peligro.
+// dialogo de confirmacion para acciones destructivas; el boton de confirmar va en coral para señalar peligro
 export function ConfirmDialog({
   open,
   title,

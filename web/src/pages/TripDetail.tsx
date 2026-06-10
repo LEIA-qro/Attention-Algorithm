@@ -8,7 +8,7 @@ import { TripRibbon } from "@/components/TripRibbon";
 import { SpeedChart } from "@/components/SpeedChart";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { NO_SIGNAL, STATE_COLOR, stateLabel, eventLabel } from "@/lib/stateColors";
-import { pick, useLang, type Lang } from "@/lib/i18n";
+import { pick, useLang, type Lang } from "@/lib/prefs";
 import type { Incident, Session, StateSample } from "@/lib/types";
 
 function fmt(ts: string, lang: Lang) {
@@ -32,8 +32,7 @@ function duration(s: Session, lang: Lang): string {
   return min < 60 ? `${min} min` : `${Math.floor(min / 60)}h ${min % 60}m`;
 }
 
-// % del viaje fuera del estado "Alerta" (índice de riesgo). Robusto a estados
-// desconocidos: cuentan como no-alerta.
+// % del viaje fuera de "Alerta"; los estados desconocidos cuentan como no-alerta
 function riskIndex(states: StateSample[]): number | null {
   if (states.length === 0) return null;
   const nonAlert = states.filter((s) => s.state !== "Alert").length;
@@ -100,9 +99,7 @@ export default function TripDetail() {
   const risk = useMemo(() => (data ? riskIndex(data.states) : null), [data]);
   const incidents = data?.incidents ?? [];
 
-  // Focus an incident on the map: fly + open its popup (handled in TripMap) and
-  // scroll the map into view. Re-set even if already focused so a repeat click
-  // re-triggers the flyTo.
+  // reenfoca el incidente en el mapa; reasignar el id aunque ya este enfocado fuerza el flyTo al volver a tocar
   function focusOnMap(inc: Incident) {
     if (inc.lat == null || inc.lng == null) return;
     setFocusedIncidentId(null);

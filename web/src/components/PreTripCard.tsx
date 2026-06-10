@@ -1,5 +1,5 @@
 import { ShieldCheck } from "lucide-react";
-import { pick, useLang } from "@/lib/i18n";
+import { pick, useLang } from "@/lib/prefs";
 
 export function PreTripCard() {
   const t = pick(useLang());

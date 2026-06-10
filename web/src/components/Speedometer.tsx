@@ -1,8 +1,6 @@
-import { pick, type Lang } from "@/lib/i18n";
+import { pick, type Lang } from "@/lib/prefs";
 
-// Gauge de velocidad estilo Waze/Maps: arco acromático que se llena con la
-// velocidad (cap visual 140 km/h) + número grande al centro. Chrome sin color;
-// el único saturado de la app sigue siendo el estado del conductor.
+// Gauge acromatico que se llena con la velocidad (cap visual 140 km/h)
 const MAX_KMH = 140;
 const ARC = 270; // grados de barrido
 const START = 135; // ángulo inicial (abajo-izquierda)

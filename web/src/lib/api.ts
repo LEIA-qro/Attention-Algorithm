@@ -15,7 +15,7 @@ function resolveDemo(): boolean {
     try {
       sessionStorage.setItem("dms-demo", "1");
     } catch {
-      /* sessionStorage unavailable; fall back to URL flag */
+      /* sessionStorage no disponible; usar la bandera de la URL */
     }
     return true;
   }
@@ -48,7 +48,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
     });
   } catch {
-    // Network/DNS/CORS failure — fetch rejects without a status.
+    // fallo de red/DNS/CORS: fetch rechaza sin status
     throw new ApiError(0, "Sin conexión con el servidor");
   }
 
@@ -56,7 +56,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, `${res.status} ${res.statusText}`.trim());
   }
 
-  // Tolerate empty/no-content bodies (e.g. 204 from POST endpoints).
+  // tolera cuerpos vacios (p.ej. 204 de los POST)
   if (res.status === 204 || res.headers.get("content-length") === "0") {
     return undefined as T;
   }
@@ -121,7 +121,7 @@ export const api = {
           body: JSON.stringify(body),
         }),
 
-  // Inyectar estado/incidente — usado por la Zona de pruebas (simula al edge sin cámara).
+  // inyectar estado/incidente, usado por la Zona de pruebas (simula al edge sin camara)
   postState: (id: string, body: { ts: string; state: DriverState; confidence: number }) =>
     DEMO
       ? Promise.resolve({ accepted: true })

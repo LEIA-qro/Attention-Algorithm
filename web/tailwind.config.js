@@ -28,9 +28,7 @@ export default {
         },
       },
       fontFamily: {
-        // Space Grotesk is the only web font loaded (index.html). `sans` is the
-        // global default; `body` aliases the same loaded stack so UI text never
-        // silently falls back to an unloaded family.
+        // Space Grotesk es la unica fuente cargada (index.html); body reusa el mismo stack para no caer en una familia no cargada.
         sans: ['"Space Grotesk"', "system-ui", "sans-serif"],
         body: ['"Space Grotesk"', "system-ui", "sans-serif"],
         mono: ['ui-monospace', "SFMono-Regular", "Menlo", "Consolas", "monospace"],

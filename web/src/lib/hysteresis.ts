@@ -20,11 +20,7 @@ const DEFAULTS: HysteresisOptions = {
   emaAlpha: 0.4,
 };
 
-/**
- * Asymmetric debounce over a sliding window of raw classifications.
- * Escalates fast to a more severe state (safety), relaxes slowly back to Alert
- * (avoids flicker). Confidence is smoothed with an EMA.
- */
+/** Debounce asimetrico: escala rapido a estados graves y relaja lento para evitar parpadeo. */
 export class HysteresisFilter {
   private buffer: DriverState[] = [];
   private current: DriverState = "Alert";
@@ -66,8 +62,7 @@ export class HysteresisFilter {
     return { state: this.current, confidence: this.ema };
   }
 
-  /** Fuerza el estado actual (p.ej. cuando el server ya confirmó un estado sostenido,
-   * que es una garantía más fuerte que el debounce del cliente). */
+  /** Fuerza el estado actual cuando el server ya confirmo un estado sostenido. */
   force(state: DriverState) {
     this.current = state;
     this.buffer = Array(this.opts.window).fill(state);

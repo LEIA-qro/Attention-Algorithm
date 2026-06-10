@@ -1,9 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Activity, ChevronRight, Minus, Plus, Settings as Gear, X } from "lucide-react";
-import { setTheme, useTheme } from "@/lib/theme";
-import { pick, setLang, useLang } from "@/lib/i18n";
-import { setSetting, useSettings } from "@/lib/settings";
+import { setTheme, useTheme, pick, setLang, useLang, setSetting, useSettings } from "@/lib/prefs";
 import { api, DEMO } from "@/lib/api";
 import type { ThresholdConfig } from "@/lib/types";
 

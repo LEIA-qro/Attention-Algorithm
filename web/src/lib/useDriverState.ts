@@ -14,9 +14,9 @@ async function rawSample(
   sessionId: string,
 ): Promise<{ state: DriverState; confidence: number; confirmed: boolean }> {
   if (DEMO) return demoLiveState();
-  // Estado CONTINUO (último state_sample que postea la RPi ~1/s), NO los incidentes:
-  // los incidentes los dispara el motor de eventos con cooldown, así que entre
-  // disparos la app se quedaba en "Alerta" aunque siguieras distraído.
+  // estado continuo (ultimo state_sample que postea la RPi ~1/s), no los incidentes:
+  // estos los dispara el motor de eventos con cooldown, asi que entre disparos la app
+  // se quedaba en "Alerta" aunque siguieras distraido
   const r = await api.latestState(sessionId);
   return { state: r.state, confidence: r.confidence, confirmed: r.confirmed };
 }
@@ -43,7 +43,7 @@ export function useDriverState(
   useEffect(() => {
     if (!running || (!DEMO && !sessionId)) return;
 
-    // Fresh telemetry for each trip (a judge will do Terminar -> Iniciar).
+    // telemetria fresca por viaje (el evaluador hara Terminar -> Iniciar)
     filter.current = new HysteresisFilter();
     prev.current = "Alert";
     setHistory([]);
@@ -63,9 +63,9 @@ export function useDriverState(
         if (!alive) return;
         setConnected(true);
         const pushed = filter.current.push(raw);
-        // El server confirma un estado solo tras sostenerlo >= umbral (P3): es una
-        // garantía más fuerte que el debounce del cliente, así que cuando confirma
-        // mostramos el estado de inmediato (sin re-esperar la histéresis) y alarmamos.
+        // el server confirma un estado solo tras sostenerlo >= umbral (P3): es garantia
+        // mas fuerte que el debounce del cliente, asi que al confirmar lo mostramos de
+        // inmediato (sin re-esperar la histeresis) y alarmamos
         let out = pushed;
         if (raw.confirmed && raw.state !== "Alert") {
           filter.current.force(raw.state);

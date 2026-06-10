@@ -1,6 +1,6 @@
 import type { LiveSample } from "@/lib/useDriverState";
 import { NO_SIGNAL, STATE_COLOR as COLOR } from "@/lib/stateColors";
-import { pick, useLang } from "@/lib/i18n";
+import { pick, useLang } from "@/lib/prefs";
 
 const WINDOW = 40; // ~60s a un poll cada 1.5s
 
@@ -68,8 +68,7 @@ export function AttentionTrace({
         {samples.map((s, i) => {
           const isLast = i === n - 1;
           const dotColor = muted ? NO_SIGNAL : COLOR[s.state];
-          // Punto de cabeza siempre visible (ancla la "cabeza" viva de la traza);
-          // los demás solo marcan muestras de alerta. Alerta en calma = línea limpia.
+          // solo el punto de cabeza es fijo; los demas marcan muestras de alerta
           const r = isLast ? 3.4 : s.state === "Alert" ? 0 : 2.4;
           if (r === 0) return null;
           return <circle key={i} cx={(i / (n - 1)) * w} cy={y(s.confidence)} r={r} fill={dotColor} />;

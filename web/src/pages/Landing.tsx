@@ -1,10 +1,10 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Gauge, LayoutDashboard } from "lucide-react";
 import { DEMO } from "@/lib/api";
-import { pick, useLang } from "@/lib/i18n";
+import { pick, useLang } from "@/lib/prefs";
 import { SettingsButton } from "@/components/SettingsButton";
 
-/** El Arco de Atención — marca estática, monocroma (color por contexto). */
+/** El Arco de Atención, marca estática monocroma (color por contexto). */
 function AttentionArc({ size = 56 }: { size?: number }) {
   return (
     <svg

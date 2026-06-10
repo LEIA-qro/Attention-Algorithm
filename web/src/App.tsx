@@ -1,6 +1,6 @@
 import { Component, lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
-import { getLang, pick, useLang } from "@/lib/i18n";
+import { getLang, pick, useLang } from "@/lib/prefs";
 
 const Landing = lazy(() => import("./pages/Landing"));
 const Conductor = lazy(() => import("./pages/Conductor"));
