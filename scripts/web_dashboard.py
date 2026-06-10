@@ -19,9 +19,13 @@ os.environ["OPENBLAS_NUM_THREADS"] = "2"
 import argparse
 import json
 import logging
+import re
+import socket
 import sys
 import threading
 import time
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -724,6 +728,7 @@ _latest_telemetry: dict = {}
 _camera_fps: float = 0.0
 _running: bool = True
 _pipeline = None
+_cloud = None
 
 
 # Camera capture thread, runs at native resolution.
@@ -819,6 +824,205 @@ def _inference_thread(pipeline):
         except Exception:
             logger.exception("Inference error")
             time.sleep(0.1)
+            continue
+
+        if _cloud is not None:
+            try:
+                _cloud.step(telemetry, ai_frame)
+            except Exception:
+                logger.exception("Cloud uplink error")
+
+
+QRO = (20.5888, -100.3899)
+
+EVENT_TO_STATE = {
+    "drowsy": "Drowsy",
+    "distracted": "Distracted",
+    "eyes_off": "Distracted",
+    "phone": "Distracted",
+    "food": "Distracted",
+    "danger": "Distracted",
+}
+
+_CLIP_RE = re.compile(r"^\d{8}_\d{6}_\d{3}_(.+)_\d+pct$")
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _cloud_post(base, path, body):
+    req = urllib.request.Request(
+        f"{base}{path}",
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read() or b"{}")
+
+
+def _cloud_get(base, path):
+    with urllib.request.urlopen(f"{base}{path}", timeout=10) as r:
+        return json.loads(r.read() or b"{}")
+
+
+def _cloud_post_async(base, path, body, rtt_holder=None):
+    def run():
+        t = time.time()
+        try:
+            _cloud_post(base, path, body)
+            if rtt_holder is not None:
+                rtt_holder["ms"] = (time.time() - t) * 1000.0
+        except Exception:
+            pass
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _upload_snapshot(base, jpg_bytes):
+    try:
+        meta = _cloud_post(base, "/uploads/presign", {"ext": "jpg"})
+        ct = meta.get("content_type", "image/jpeg")
+        req = urllib.request.Request(meta["url"], data=jpg_bytes, headers={"Content-Type": ct}, method="PUT")
+        urllib.request.urlopen(req, timeout=10)
+        return meta["key"]
+    except Exception:
+        return None
+
+
+def _upload_clip(base, path):
+    try:
+        data = path.read_bytes()
+        meta = _cloud_post(base, "/uploads/presign", {"ext": "mp4"})
+        ct = meta.get("content_type", "video/mp4")
+        req = urllib.request.Request(meta["url"], data=data, headers={"Content-Type": ct}, method="PUT")
+        urllib.request.urlopen(req, timeout=30)
+        return meta["key"]
+    except Exception:
+        return None
+
+
+def _clip_event_type(path):
+    m = _CLIP_RE.match(path.stem)
+    return m.group(1) if m else None
+
+
+class CloudUplink:
+    def __init__(self, pipeline, base, name, state_every=0.4, fake_gps=False, clip_dir=None):
+        self.pipeline = pipeline
+        self.base = base
+        self.name = name
+        self.state_every = state_every
+        self.fake_gps = fake_gps
+        self.clip_dir = clip_dir
+        self.seen_clips = {p.name for p in clip_dir.glob("*.mp4")} if clip_dir and clip_dir.exists() else set()
+        self.active_sid = None
+        self.last_poll = self.last_hb = self.last_state = self.last_track = self.last_clip_scan = 0.0
+        self.pending_clips = []
+        self.gps = list(QRO)
+        self.rtt = {"ms": 0.0}
+
+    def step(self, telemetry, frame):
+        state = telemetry.get("state", "Alert")
+        probs = telemetry.get("probs", {})
+        conf = float(probs.get(state.lower(), 0.0))
+        triggers = telemetry.get("triggers", []) or []
+        now = time.time()
+
+        if now - self.last_hb >= 3.0:
+            self.last_hb = now
+            _cloud_post_async(self.base, "/devices/heartbeat", {"name": self.name, "kind": "camera"})
+
+        if now - self.last_poll >= 1.0:
+            self.last_poll = now
+            try:
+                cs = _cloud_get(self.base, "/current-session")
+                sid = cs.get("session_id") if cs.get("active") else None
+            except Exception:
+                sid = self.active_sid
+            if sid != self.active_sid:
+                if sid:
+                    self.active_sid = sid
+                    self.last_state = self.last_track = 0.0
+                    self.gps = list(QRO)
+                    self.pending_clips.clear()
+                    if self.clip_dir and self.clip_dir.exists():
+                        self.seen_clips.update(p.name for p in self.clip_dir.glob("*.mp4"))
+                    try:
+                        self.pipeline.calibrate()
+                    except Exception:
+                        pass
+                    logger.info("Trip started: %s", self.active_sid)
+                else:
+                    logger.info("Trip ended: %s", self.active_sid)
+                    self.active_sid = None
+                    self.pending_clips.clear()
+
+        if not self.active_sid:
+            return
+
+        ts = _now_iso()
+        if (now - self.last_state) >= self.state_every:
+            _cloud_post_async(self.base, f"/sessions/{self.active_sid}/states",
+                              {"ts": ts, "state": state, "confidence": conf}, self.rtt)
+            self.last_state = now
+
+        if self.fake_gps and (now - self.last_track) >= 2.0:
+            self.gps[0] += 0.00018
+            self.gps[1] += 0.00022
+            _cloud_post(self.base, f"/sessions/{self.active_sid}/track",
+                        {"ts": ts, "lat": self.gps[0], "lng": self.gps[1], "speed_kmh": 60})
+            self.last_track = now
+
+        for evt in triggers:
+            inc_state = EVENT_TO_STATE.get(evt, "Distracted")
+            snap_key = None
+            enc_ok, jpg = cv2.imencode(".jpg", frame)
+            if enc_ok:
+                snap_key = _upload_snapshot(self.base, jpg.tobytes())
+            resp = _cloud_post(self.base, f"/sessions/{self.active_sid}/incidents", {
+                "ts": ts, "state": inc_state,
+                "confidence": float(probs.get(inc_state.lower(), conf)) or 0.9,
+                "speed_kmh": 60 if self.fake_gps else None,
+                "lat": self.gps[0] if self.fake_gps else None,
+                "lng": self.gps[1] if self.fake_gps else None,
+                "snapshot_key": snap_key,
+                "event_type": evt,
+                "harsh_event": False,
+            })
+            inc_id = resp.get("incident_id")
+            if inc_id:
+                self.pending_clips.append({"id": inc_id, "event_type": evt, "ts": now})
+
+        if (now - self.last_clip_scan) >= 1.5 and self.clip_dir and self.clip_dir.exists():
+            self.last_clip_scan = now
+            self.pending_clips[:] = [p for p in self.pending_clips if now - p["ts"] < 30.0]
+            for cp in sorted(self.clip_dir.glob("*.mp4")):
+                if cp.name in self.seen_clips:
+                    continue
+                try:
+                    st = cp.stat()
+                except OSError:
+                    continue
+                if st.st_size == 0 or (now - st.st_mtime) < 2.0:
+                    continue
+                evt_type = _clip_event_type(cp)
+                match = next((p for p in reversed(self.pending_clips)
+                              if p["event_type"] == evt_type and not p.get("matched")), None)
+                if match is None:
+                    if (now - st.st_mtime) > 15.0:
+                        self.seen_clips.add(cp.name)
+                    continue
+                key = _upload_clip(self.base, cp)
+                self.seen_clips.add(cp.name)
+                if key:
+                    try:
+                        _cloud_post(self.base,
+                                    f"/sessions/{self.active_sid}/incidents/{match['id']}/clip", {"key": key})
+                        match["matched"] = True
+                    except Exception:
+                        pass
 
 
 app = Flask(__name__)
@@ -904,6 +1108,11 @@ def main():
                         help="Camera display resolution width (default 1280)")
     parser.add_argument("--res-h", type=int, default=720,
                         help="Camera display resolution height (default 720)")
+    parser.add_argument("--cloud", action="store_true")
+    parser.add_argument("--base", default="https://34-205-126-89.nip.io/api")
+    parser.add_argument("--name", default=socket.gethostname())
+    parser.add_argument("--state-every", type=float, default=0.4)
+    parser.add_argument("--fake-gps", action="store_true")
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
@@ -973,6 +1182,16 @@ def main():
     global _pipeline
     _pipeline = pipeline
 
+    global _cloud
+    if args.cloud:
+        try:
+            clip_dir = Path(getattr(pipeline, "_clip_writer")._output_dir)
+        except Exception:
+            clip_dir = _PROJECT_ROOT / "output" / "clips"
+        _cloud = CloudUplink(pipeline, args.base, args.name,
+                             state_every=args.state_every, fake_gps=args.fake_gps,
+                             clip_dir=clip_dir)
+
     logger.info("=" * 60)
     logger.info("DMS WEB DASHBOARD (Decoupled Architecture)")
     logger.info("  Source:        %s", args.source)
@@ -980,6 +1199,8 @@ def main():
     logger.info("  AI res:        %dx%d", _AI_WIDTH, _AI_HEIGHT)
     logger.info("  Selfie:        %s", selfie)
     logger.info("  Backend:       %s", args.backend)
+    logger.info("  Cloud:         %s",
+                f"on -> {args.base} as '{args.name}'" if args.cloud else "off")
     logger.info("  Dashboard:     http://%s:%d", args.host, args.port)
     logger.info("=" * 60)
 
