@@ -1,36 +1,12 @@
 #!/usr/bin/env python3
-"""
-10_web_dashboard.py — Production Web Dashboard for Driver Monitoring System
-============================================================================
+"""Web dashboard for the driver monitoring system.
 
-Architecture
-------------
-Three threads, fully decoupled:
+Three decoupled threads: a camera thread reads frames at native resolution, an
+inference thread runs the pipeline on downscaled frames, and Flask serves an
+MJPEG /video_feed plus an SSE /telemetry_feed. The independent camera thread
+keeps the video stream from being bottlenecked by AI processing.
 
-1. **Camera thread** — reads from the webcam at native resolution (e.g. 720p
-   or 1080p) at the camera's native frame rate (~30 fps).  Stores the latest
-   frame in a shared variable.
-
-2. **Inference thread** — grabs the latest camera frame, downscales it to the
-   resolution the AI models were trained on (640×480), passes it through the
-   full pipeline (YOLO → MediaPipe → LSTM → heuristics → event engine), and
-   stores the resulting telemetry + bounding-box coordinates.
-
-3. **Flask server** — serves two streaming endpoints:
-   - ``/video_feed``  MJPEG at ~30 fps from the raw high-res camera frames
-   - ``/telemetry_feed``  Server-Sent Events at ~10 Hz with classification,
-     metrics, objects, and events.
-
-Because the camera thread and the inference thread are independent, the video
-feed is never bottlenecked by AI processing.  The AI metrics simply update at
-whatever rate the hardware allows (~8-15 fps on CPU).
-
-Usage
------
-    python scripts/10_web_dashboard.py --source 0 --selfie
-    python scripts/10_web_dashboard.py --source 0 --selfie --host 0.0.0.0 --port 8080
-
-Then open http://<ip>:5000 in a browser.
+Run with: python scripts/10_web_dashboard.py --source 0 --selfie
 """
 
 from __future__ import annotations
@@ -64,10 +40,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 logger = logging.getLogger("dms.web_dashboard")
 
-# ---------------------------------------------------------------------------
-# HTML / CSS / JS — embedded for single-file deployment
-# ---------------------------------------------------------------------------
-
+# HTML/CSS/JS embedded for single-file deployment.
 DASHBOARD_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -598,7 +571,7 @@ body {
             }).join('');
         }
 
-        // Events — append new triggers
+        // Events: append new triggers
         if (d.triggers && d.triggers.length > 0) {
             for (const t of d.triggers) {
                 eventLog.unshift({ type: t, time: new Date() });
@@ -727,10 +700,6 @@ body {
 </html>"""
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _load_yaml(path: str):
     p = Path(path)
     return yaml.safe_load(p.read_text(encoding="utf-8")) or {} if p.exists() else {}
@@ -739,27 +708,23 @@ def _load_yaml(path: str):
 def _setup_logging(level: str = "INFO"):
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
-        format="[%(asctime)s] %(levelname)-8s %(name)s — %(message)s",
+        format="[%(asctime)s] %(levelname)-8s %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
 
-# ---------------------------------------------------------------------------
-# Shared state (all protected by _lock)
-# ---------------------------------------------------------------------------
+# Shared state, all protected by _lock.
 _lock = threading.Lock()
 _frame_cond = threading.Condition(_lock)
-_latest_frame: np.ndarray | None = None      # Raw high-res camera frame
-_latest_jpeg: bytes = b""                      # JPEG-encoded display frame
-_latest_telemetry: dict = {}                   # Last inference result
-_camera_fps: float = 0.0                       # Camera capture FPS
-_running: bool = True                          # Shutdown flag
-_pipeline = None                               # Global pipeline instance
+_latest_frame: np.ndarray | None = None
+_latest_jpeg: bytes = b""
+_latest_telemetry: dict = {}
+_camera_fps: float = 0.0
+_running: bool = True
+_pipeline = None
 
 
-# ---------------------------------------------------------------------------
-# Thread 1: Camera capture at native resolution
-# ---------------------------------------------------------------------------
+# Camera capture thread, runs at native resolution.
 def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
     """Continuously read frames from the camera and store the latest one."""
     global _latest_frame, _latest_jpeg, _camera_fps, _running
@@ -801,7 +766,6 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
             if selfie:
                 frame = cv2.flip(frame, 1)
 
-            # Track camera FPS
             now = time.perf_counter()
             fps_times.append(now)
             if len(fps_times) > 60:
@@ -821,16 +785,14 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
         logger.info("Camera thread stopped.")
 
 
-# ---------------------------------------------------------------------------
-# Thread 2: AI inference on downscaled frames
-# ---------------------------------------------------------------------------
+# Inference thread, runs the pipeline on downscaled frames.
 _AI_WIDTH = 960
 _AI_HEIGHT = 540
 
 
 def _inference_thread(pipeline):
     """Grab latest camera frame, moderately downscale, run AI, store telemetry."""
-    global _latest_telemetry, _running
+    global _latest_telemetry
 
     while _running:
         with _lock:
@@ -857,9 +819,6 @@ def _inference_thread(pipeline):
             time.sleep(0.1)
 
 
-# ---------------------------------------------------------------------------
-# Flask app
-# ---------------------------------------------------------------------------
 app = Flask(__name__)
 
 
@@ -923,9 +882,6 @@ def telemetry_feed():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     global _running
 
@@ -979,7 +935,7 @@ def main():
 
     hef_path = Path(args.hef) if args.hef else None
 
-    # Dynamically import the pipeline class from 09_surveillance_custom.py
+    # Load the pipeline by file path since the script name starts with a digit.
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "surveillance_custom",
@@ -988,8 +944,7 @@ def main():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    # Create pipeline in EXTERNAL-CAPTURE mode (source=None)
-    # The AI processes at 640x480 regardless of camera resolution
+    # External-capture mode: the dashboard feeds frames in, AI runs at _AI_WIDTH x _AI_HEIGHT.
     pipeline = mod.SurveillancePipeline(
         onnx_path=onnx_path, mediapipe_model_path=mp_model,
         yolo_cfg=yolo_cfg, events_cfg=events_cfg,
@@ -1026,7 +981,6 @@ def main():
     logger.info("  Dashboard:     http://%s:%d", args.host, args.port)
     logger.info("=" * 60)
 
-    # Start camera thread (reads at display resolution, ~30fps)
     t_cam = threading.Thread(
         target=_camera_thread,
         args=(args.source, selfie, args.res_w, args.res_h),
@@ -1034,7 +988,6 @@ def main():
     )
     t_cam.start()
 
-    # Start inference thread (processes at 640x480, whatever speed the CPU allows)
     t_inf = threading.Thread(
         target=_inference_thread,
         args=(pipeline,),

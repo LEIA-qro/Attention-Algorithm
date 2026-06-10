@@ -1,29 +1,19 @@
-"""
-custom_features.py — Custom Feature Extractor with absolute gaze and robust face loss.
-"""
+"""feature extractor variant: absolute gaze plus face-loss handling."""
 
 import logging
 import math
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-import cv2
-import mediapipe as mp
 import numpy as np
 
-from src.features import FeatureExtractor, FEATURE_NAMES
+from src.features import FeatureExtractor
 
 logger = logging.getLogger(__name__)
 
 
 class CustomFeatureExtractor(FeatureExtractor):
-    """
-    Subclass of FeatureExtractor that:
-    1. Computes absolute gaze: sqrt((head_yaw + gaze_yaw)**2 + (head_pitch + gaze_pitch)**2)
-       for the eyes-off-road percentage feature.
-    2. Handles robust face loss by appending normal/default temporal values to queues
-       and updating the blink tracker without triggering false blinks.
-    """
+    """feature extractor using absolute gaze and default temporal values on face loss"""
 
     def __init__(
         self,
@@ -43,7 +33,7 @@ class CustomFeatureExtractor(FeatureExtractor):
         self._landmarker.detect_for_video = wrapped_detect
 
     def _compute_eyes_off_road(self, current_s: float) -> float:
-        """Percentage of time gaze is >threshold degrees from centre, using absolute gaze."""
+        """fraction of recent gaze samples past the off-road angle, using absolute gaze"""
         cutoff = current_s - self._gaze_offroad_window_s
         total = 0
         off_road = 0
@@ -68,13 +58,13 @@ class CustomFeatureExtractor(FeatureExtractor):
         frame: np.ndarray,
         timestamp_ms: int,
     ) -> Dict[str, float]:
-        """Extract features, checking for face detection and handling face loss robustly."""
+        """extract features, falling back to defaults when the face is lost"""
         feats = super().extract(frame, timestamp_ms)
         
         if self._last_result and not self._last_result.face_landmarks:
             timestamp_s = timestamp_ms / 1000.0
             
-            # Append default face-lost values to histories to maintain temporal windows
+            # keep temporal windows filled on face loss
             self._ear_history.append(1.0)
             self._ear_ts.append(timestamp_s)
             self._eye_closed_flags.append(False)
@@ -87,13 +77,13 @@ class CustomFeatureExtractor(FeatureExtractor):
             self._head_roll_history.append(0.0)
             self._head_ts.append(timestamp_s)
             
-            # Call blink tracker update with a normal EAR (e.g. 0.30) to avoid registering false blinks
+            # normal ear so the tracker logs no false blink
             self._blink_tracker.update(0.30, timestamp_s, self.fps)
             
-            # Mouth open frames resets
+            # reset mouth-open counter
             self._mouth_open_frames = 0
             
-            # Update the feats dictionary (merging/updating values)
+            # override per-frame feats
             feats["ear_left"] = 1.0
             feats["ear_right"] = 1.0
             feats["ear_avg"] = 1.0
@@ -105,7 +95,7 @@ class CustomFeatureExtractor(FeatureExtractor):
             feats["gaze_yaw"] = 90.0
             feats["gaze_pitch"] = 0.0
             
-            # Temporal features
+            # temporal features
             feats["perclos"] = self._compute_perclos(timestamp_s)
             feats["blink_rate"] = self._blink_tracker.blink_rate(timestamp_s, window_s=60.0)
             feats["blink_duration_avg"] = self._blink_tracker.avg_duration(timestamp_s, window_s=60.0)

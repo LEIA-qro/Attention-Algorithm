@@ -1,21 +1,6 @@
-"""
-detection.py — YOLOv8n Wrapper and Driver Tracker
-==================================================
+"""YOLOv8n person detection and IoU-based driver tracking.
 
-Public API
-----------
-- ``load_yolo(model_path) -> YOLO``
-- ``detect_persons(model, frame, conf_thresh, person_class_id) -> list[tuple[ndarray, float]]``
-- ``score_driver_candidate(box, frame_w, frame_h, drive_side, weights) -> float``
-- ``iou(boxA, boxB) -> float``
-- ``pad_box(box, padding, frame_w, frame_h) -> ndarray``
-- ``DriverTracker(cfg, frame_w, frame_h)``
-    - ``.update(person_boxes, frame_count) -> ndarray | None``
-    - ``.reset()``
-- ``detect_objects_in_roi(model, frame, driver_box, cfg) -> Tuple[Dict, List]``
-
-All bounding boxes are ``np.ndarray`` shape ``(4,)`` with values
-``[x1, y1, x2, y2]`` in pixel coordinates (float32).
+Boxes are np.ndarray shape (4,) [x1, y1, x2, y2] in pixel coordinates (float32).
 """
 
 from __future__ import annotations
@@ -25,27 +10,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-__all__ = [
-    "load_yolo",
-    "detect_persons",
-    "score_driver_candidate",
-    "iou",
-    "pad_box",
-    "DriverTracker",
-    "detect_objects_in_roi",
-]
-
 logger = logging.getLogger(__name__)
 
 
 def load_yolo(model_path: str):
-    """Load a YOLOv8 model. Downloads weights on first call if given a
-    model name like ``"yolov8n.pt"``.
-
-    Returns
-    -------
-    ultralytics.YOLO
-    """
+    """Load a YOLOv8 model, downloading weights on first use if given a name like "yolov8n.pt"."""
     from ultralytics import YOLO
     model = YOLO(model_path)
     logger.info("YOLOv8 model loaded: %s", model_path)
@@ -60,13 +29,7 @@ def detect_persons(
     device: str | None = None,
     imgsz: int = 320,
 ) -> List[Tuple[np.ndarray, float]]:
-    """Run YOLO and return all person detections above ``conf_thresh``.
-
-    Returns
-    -------
-    list of (box, conf)
-        box is np.ndarray([x1, y1, x2, y2], dtype=float32).
-    """
+    """Run YOLO and return (box, conf) for every person detection above conf_thresh."""
     results = model(frame, device=device, verbose=False, imgsz=imgsz)
     persons: List[Tuple[np.ndarray, float]] = []
     for result in results:
@@ -88,18 +51,7 @@ def score_driver_candidate(
     drive_side: str,
     weights: Dict[str, float],
 ) -> float:
-    """Heuristic score for how likely a bounding box is the driver.
-
-    Sub-scores
-    ----------
-    horizontal_position : 1.0 at the expected drive side, 0.0 at opposite.
-    box_area            : box area / frame area (larger = closer = driver).
-    vertical_anchor     : 1.0 if box centre is in upper 60% of frame.
-
-    Returns
-    -------
-    float in [0, 1]
-    """
+    """Score 0-1 for how likely a box is the driver, weighting horizontal position, area, and vertical anchor."""
     x1, y1, x2, y2 = box
     cx = (x1 + x2) / 2.0
     cy = (y1 + y2) / 2.0
@@ -152,15 +104,7 @@ def pad_box(
 
 
 class DriverTracker:
-    """Tracks the driver's bounding box across frames using IoU matching.
-
-    Parameters
-    ----------
-    cfg : dict
-        The ``yolo:`` section from ``yolo_config.yaml``.
-    frame_w, frame_h : int
-        Full frame dimensions.
-    """
+    """Tracks the driver's box across frames by IoU matching, re-scoring candidates periodically."""
 
     def __init__(self, cfg: Dict[str, Any], frame_w: int, frame_h: int) -> None:
         self._drive_side: str = cfg.get("drive_side", "left")
@@ -179,17 +123,7 @@ class DriverTracker:
         person_boxes: List[Tuple[np.ndarray, float]],
         frame_count: int,
     ) -> Optional[np.ndarray]:
-        """Update tracker with new person detections.
-
-        Parameters
-        ----------
-        person_boxes : list of (box, conf) — output of detect_persons()
-        frame_count : int — monotonically increasing from 1
-
-        Returns
-        -------
-        np.ndarray shape (4,) or None
-        """
+        """Update the tracked box from the latest person detections; returns the driver box or None."""
         if not person_boxes:
             self._tracked_box = None
             return None
@@ -205,7 +139,6 @@ class DriverTracker:
                     self._tracked_box = box
                     return self._tracked_box
 
-        # Full re-score
         best_score = -1.0
         best_box: Optional[np.ndarray] = None
         for box, _conf in person_boxes:
@@ -231,28 +164,8 @@ def detect_objects_in_roi(
     driver_box: np.ndarray,
     cfg: Dict[str, Any],
 ) -> Tuple[Dict[str, float], List[Dict[str, Any]]]:
-    """Run YOLO object detection inside the driver's ROI.
-
-    Crops driver_box (+ roi_padding_px) from frame, runs YOLO, and returns
-    the maximum confidence per event category defined in class_to_event,
-    along with a list of detected objects (their labels, confidences,
-    and bounding boxes mapped to the full frame).
-
-    Parameters
-    ----------
-    model : ultralytics.YOLO
-    frame : np.ndarray — full BGR uint8 frame
-    driver_box : np.ndarray shape (4,) — [x1, y1, x2, y2]
-    cfg : dict — the ``yolo:`` section from yolo_config.yaml
-
-    Returns
-    -------
-    tuple of (event_scores, detected_objects)
-        event_scores: dict[str, float]
-        detected_objects: list of dicts with keys: "label", "conf", "box"
-    """
+    """Run YOLO in the driver's ROI; returns max confidence per event plus detected objects in full-frame coords."""
     conf_thresh: float = cfg.get("object_conf_thresh", 0.45)
-    padding: int = cfg.get("roi_padding_px", 30)
     device = cfg.get("device", None)
     imgsz = cfg.get("imgsz", 320)
     class_to_event: Dict[int, str] = {
@@ -267,20 +180,13 @@ def detect_objects_in_roi(
     if not event_scores:
         return event_scores, detected_objects
 
-    h, w = frame.shape[:2]
-    # We still calculate padded to potentially filter later, but we run YOLO on full frame
-    if driver_box is None:
-        padded = [0, 0, w, h]
-    else:
-        padded = pad_box(driver_box, padding, w, h)
-    
-    # Bypass ROI cropping to ensure objects like phones held wide are never clipped out
+    # Run YOLO on the full frame so wide-held objects like phones are never clipped by an ROI crop.
     roi = frame
     x1, y1 = 0, 0
     if roi.size == 0:
         return event_scores, detected_objects
 
-    # Pass conf=conf_thresh to YOLO to override its internal default of 0.25
+    # Override YOLO's internal default conf of 0.25.
     results = model(roi, device=device, verbose=False, imgsz=imgsz, conf=conf_thresh)
     for result in results:
         if result.boxes is None:

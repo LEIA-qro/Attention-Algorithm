@@ -1,22 +1,8 @@
-"""
-event_engine.py — Signal Merger and Trigger Dispatcher
-=======================================================
-
-Public API
-----------
-- ``SignalFrame`` — dataclass, one per frame
-- ``EventEngine(cfg, fps)``
-    - ``.update(signal_frame) -> list[dict]``
-    - ``.reset()``
-"""
-
-from __future__ import annotations
+"""Merge per-frame signals and dispatch event triggers with sustain/cooldown/re-trigger logic."""
 
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List
-
-__all__ = ["SignalFrame", "EventEngine"]
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +11,7 @@ ALL_EVENT_TYPES = ["phone", "food", "danger", "drowsy", "distracted", "eyes_off"
 
 @dataclass
 class SignalFrame:
-    """Aggregated signals for one video frame.
-
-    phone, food, danger  : max YOLO confidence in driver ROI (0-1, 0=not detected)
-    drowsy_prob          : DriverStateNet softmax for class 1 (Drowsy)
-    distracted_prob      : DriverStateNet softmax for class 2 (Distracted)
-    alert_prob           : DriverStateNet softmax for class 0 (Alert)
-    eyes_off_road_pct    : value of eyes_off_road_pct feature (0-1)
-    timestamp_s          : seconds from session start
-    """
+    """Aggregated detector and model signals for one video frame."""
     phone: float
     food: float
     danger: float
@@ -45,15 +23,10 @@ class SignalFrame:
 
 
 class EventEngine:
-    """Sustain + cooldown + re-trigger logic.
-
-    Parameters
-    ----------
-    cfg : dict — the ``events:`` section from yolo_config.yaml
-    fps : float — video frame rate (used for logging only)
-    """
+    """Sustain, cooldown, and re-trigger gating over the merged signals."""
 
     def __init__(self, cfg: Dict[str, Any], fps: float = 30.0) -> None:
+        # cfg is the events: section of yolo_config.yaml; fps is kept for logging only.
         self._fps = fps
         s = cfg.get("sustain_seconds", {})
         self._sustain: Dict[str, float] = {evt: s.get(evt, 1.5) for evt in ALL_EVENT_TYPES}
@@ -67,11 +40,7 @@ class EventEngine:
         self._trigger_count: Dict[str, int] = {e: 0 for e in ALL_EVENT_TYPES}
 
     def update(self, frame: SignalFrame) -> List[Dict[str, Any]]:
-        """Process one frame. Returns list of trigger dicts (may be empty).
-
-        Each trigger dict has keys: event_type (str), confidence (float),
-        timestamp_s (float).
-        """
+        """Process one frame and return any fired triggers as dicts."""
         active = self._active_signals(frame)
         triggers = []
 

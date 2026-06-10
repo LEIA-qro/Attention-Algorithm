@@ -1,31 +1,9 @@
-"""
-Driver Monitoring System (DMS) — Core Training Pipeline
-========================================================
-
-This package provides the end-to-end pipeline for training a driver
-state classification model (Alert / Drowsy / Distracted) using:
-
-- MediaPipe Face Landmarker v2 for facial feature extraction
-- CLAHE-based adaptive preprocessing
-- An 18-dimensional temporal feature vector
-- A Bi-LSTM with temporal attention (DriverStateNet, ~200K params)
-
-Modules
--------
-preprocessing : Frame-level image preprocessing (CLAHE, gamma, resize).
-features      : Per-frame + temporal feature extraction via MediaPipe.
-model         : DriverStateNet architecture definition.
-dataset       : Sliding-window dataset and dataloader utilities.
-utils         : Logging, checkpointing, metrics, plotting helpers.
-"""
-
-from __future__ import annotations
+"""DMS core training pipeline: preprocessing, feature extraction, the DriverStateNet model, dataset utilities, and training helpers."""
 
 __version__ = "0.1.0"
 __author__ = "Antigravity"
 
-# Lazy imports to avoid heavy dependencies on ``import src``
-# Users can do: ``from src import DriverStateNet, FeatureExtractor, ...``
+# Lazy-load submodules so `import src` stays cheap.
 
 __all__ = [
     # preprocessing

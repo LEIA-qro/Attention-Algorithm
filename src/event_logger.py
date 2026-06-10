@@ -1,15 +1,4 @@
-"""
-event_logger.py — CSV and JSON Event Log Writer
-================================================
-
-Public API
-----------
-- ``EventLogger(output_dir, base_name)``
-    - ``.log(event_type, confidence, trigger_timestamp_s, clip_path, driver_box)``
-    - ``.close()``
-"""
-
-from __future__ import annotations
+"""Write triggered events to paired CSV and JSON files, one row per event."""
 
 import csv
 import json
@@ -19,8 +8,6 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
-
-__all__ = ["EventLogger"]
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +19,7 @@ CSV_COLUMNS = [
 
 
 class EventLogger:
-    """Appends one row per ``log()`` call to a CSV and a JSON file.
-
-    Both files share the same session-timestamp suffix so they're paired.
-
-    Parameters
-    ----------
-    output_dir : Path  — created if absent
-    base_name : str    — file prefix (e.g. "events")
-    """
+    """Append one row per log() call to a CSV and a JSON file sharing the same session timestamp."""
 
     def __init__(self, output_dir: Path, base_name: str = "events") -> None:
         self._output_dir = Path(output_dir)
@@ -53,8 +32,8 @@ class EventLogger:
         self._writer = csv.DictWriter(self._csv_file, fieldnames=CSV_COLUMNS)
         self._writer.writeheader()
         self._csv_file.flush()
-        logger.info("EventLogger CSV  → %s", self._csv_path)
-        logger.info("EventLogger JSON → %s", self._json_path)
+        logger.info("EventLogger CSV  -> %s", self._csv_path)
+        logger.info("EventLogger JSON -> %s", self._json_path)
 
     def log(
         self,

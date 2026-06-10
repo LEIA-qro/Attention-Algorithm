@@ -1,15 +1,4 @@
-"""
-clip_writer.py — Ring-Buffer Frame Store and MP4 Clip Saver
-============================================================
-
-Public API
-----------
-- ``ClipWriter(output_dir, fps, pre_buffer_seconds, post_buffer_seconds, fourcc)``
-    - ``.push_frame(frame, timestamp_s)``
-    - ``.save_clip(event_type, confidence, trigger_timestamp_s, post_frames) -> Path | None``
-    - ``.reset()``
-    - ``._ring_buffer``  — deque[tuple[ndarray, float]] (accessible for tests)
-"""
+"""Ring buffer of recent frames plus a background MP4 clip writer."""
 
 from __future__ import annotations
 
@@ -30,16 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClipWriter:
-    """Ring-buffer of frames + MP4 writer.
-
-    Parameters
-    ----------
-    output_dir : Path    — directory for saved clips (created if absent)
-    fps : float          — source video frame rate
-    pre_buffer_seconds   — seconds before trigger to include
-    post_buffer_seconds  — seconds after trigger (caller provides post_frames)
-    fourcc : str         — OpenCV FourCC codec string, e.g. "mp4v"
-    """
+    """Buffers recent frames and writes triggered clips to MP4 on a worker thread."""
 
     def __init__(
         self,
@@ -89,13 +69,7 @@ class ClipWriter:
         trigger_timestamp_s: float,
         post_frames: List[np.ndarray],
     ) -> Path:
-        """Asynchronously write ring-buffer frames + post_frames to an MP4 file.
-        
-        Returns
-        -------
-        Path where the file will be written.
-        """
-        # Defensive copy of frames
+        """Queue ring-buffer plus post_frames for background MP4 writing and return the target path."""
         all_frames = [f.copy() for f, _ in self._ring_buffer] + [f.copy() for f in post_frames]
         out_path = self.get_clip_path(event_type, confidence, trigger_timestamp_s)
         self._queue.put((event_type, confidence, trigger_timestamp_s, all_frames))
@@ -132,12 +106,7 @@ class ClipWriter:
         trigger_timestamp_s: float,
         post_frames: List[np.ndarray],
     ) -> Optional[Path]:
-        """Write ring-buffer frames + post_frames to an MP4 file.
-
-        Returns
-        -------
-        Path of written file, or None if writing failed.
-        """
+        """Write ring-buffer plus post_frames to an MP4 and return its path, or None on failure."""
         all_frames = [f.copy() for f, _ in self._ring_buffer] + [f.copy() for f in post_frames]
         return self._write_clip_sync(event_type, confidence, trigger_timestamp_s, all_frames)
 

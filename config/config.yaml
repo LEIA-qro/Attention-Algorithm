@@ -221,7 +221,7 @@ training:
 
   # Mixed precision
   mixed_precision: true
-  compile_model: false               # torch.compile() — set true for PyTorch 2.x
+  compile_model: false               # torch.compile(): set true for PyTorch 2.x
 
   # Reproducibility
   seed: 42

@@ -1,13 +1,4 @@
-"""
-custom_clip_writer.py — Custom Clip Writer with pre_frames support
-==================================================================
-
-Public API
-----------
-- ``CustomClipWriter(output_dir, fps, pre_buffer_seconds, post_buffer_seconds, fourcc)``
-    - ``.save_clip_async(event_type, confidence, trigger_timestamp_s, post_frames, pre_frames=None) -> Path``
-    - ``.save_clip(event_type, confidence, trigger_timestamp_s, post_frames, pre_frames=None) -> Path | None``
-"""
+"""ClipWriter variant that accepts explicit pre_frames instead of the ring buffer."""
 
 from __future__ import annotations
 
@@ -22,14 +13,14 @@ __all__ = ["CustomClipWriter"]
 
 
 class CustomClipWriter(ClipWriter):
-    """Subclass of ClipWriter supporting custom pre_frames."""
+    """ClipWriter that accepts explicit pre_frames instead of pulling from the ring buffer."""
 
     def _prepare_frames(
         self,
         post_frames: List[np.ndarray],
         pre_frames: Optional[List[np.ndarray]] = None,
     ) -> List[np.ndarray]:
-        """Prepare frames by copying and merging pre_frames and post_frames."""
+        """Copy and concatenate pre_frames (or the ring buffer) with post_frames."""
         if pre_frames is None:
             pre_frames_copied = [f.copy() for f, _ in self._ring_buffer]
         else:
@@ -45,12 +36,7 @@ class CustomClipWriter(ClipWriter):
         post_frames: List[np.ndarray],
         pre_frames: Optional[List[np.ndarray]] = None,
     ) -> Path:
-        """Asynchronously write (pre_frames or ring-buffer frames) + post_frames to an MP4 file.
-
-        Returns
-        -------
-        Path where the file will be written.
-        """
+        """Queue pre_frames (or the ring buffer) plus post_frames for background writing and return the target path."""
         all_frames = self._prepare_frames(post_frames, pre_frames)
         out_path = self.get_clip_path(event_type, confidence, trigger_timestamp_s)
         self._queue.put((event_type, confidence, trigger_timestamp_s, all_frames))
@@ -64,11 +50,6 @@ class CustomClipWriter(ClipWriter):
         post_frames: List[np.ndarray],
         pre_frames: Optional[List[np.ndarray]] = None,
     ) -> Optional[Path]:
-        """Write (pre_frames or ring-buffer frames) + post_frames to an MP4 file.
-
-        Returns
-        -------
-        Path of written file, or None if writing failed.
-        """
+        """Write pre_frames (or the ring buffer) plus post_frames to an MP4 and return its path, or None on failure."""
         all_frames = self._prepare_frames(post_frames, pre_frames)
         return self._write_clip_sync(event_type, confidence, trigger_timestamp_s, all_frames)

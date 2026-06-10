@@ -1,40 +1,15 @@
 #!/usr/bin/env python3
-"""
-08_surveillance.py — Driver Surveillance Pipeline
-==================================================
+"""Driver surveillance pipeline: YOLOv8n person/object detection, MediaPipe +
+DriverStateNet state classification, event engine, and clip + CSV/JSON logging.
 
-Full 4-layer pipeline:
-  Frame
-   └─► YOLOv8n person detection → DriverTracker → driver_box
-        ├─► pad+crop driver_box → preprocess_frame → FeatureExtractor
-        │    → 18-D feat vec → DriverStateNet ONNX → drowsy/distracted probs
-        └─► YOLOv8n object detection in driver_box
-             → phone, food, danger confidences
-   All signals → EventEngine → triggers
-   Trigger → ClipWriter (±5s MP4) + EventLogger (CSV/JSON)
-
-Usage
------
     python scripts/08_surveillance.py --source 0
     python scripts/08_surveillance.py --source path/to/video.mp4 --no-display
-    python scripts/08_surveillance.py --help
-
-Controls (display on)
-----------------------
-    q   Quit
-    r   Reset all state
-    h   Toggle help overlay
-
-Output
-------
-    output/clips/   — MP4 clips
-    output/logs/    — events_<timestamp>.csv and .json
 """
 
 from __future__ import annotations
 
 import os
-# Optimize CPU utilization by limiting threads for highly parallelised libraries
+# Cap threads on parallel libs so we don't oversubscribe the Pi's cores.
 os.environ["OMP_NUM_THREADS"] = "2"
 os.environ["MKL_NUM_THREADS"] = "2"
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
@@ -48,7 +23,7 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional
 
 import cv2
 cv2.setNumThreads(2)
@@ -86,22 +61,18 @@ def _load_yaml(path: str) -> Dict[str, Any]:
 def _setup_logging(level: str = "INFO") -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
-        format="[%(asctime)s] %(levelname)-8s %(name)s — %(message)s",
+        format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
 
 class OnnxInferenceSession:
-    """Thin ONNX Runtime wrapper for DriverStateNet.
-
-    Input:  "features"  shape (1, seq_len, 18) float32
-    Output: "logits"    shape (1, 3)            float32
-    """
+    """ONNX Runtime wrapper for DriverStateNet (features (1, seq_len, 18) in, logits (1, 3) out)."""
     def __init__(self, onnx_path: Path) -> None:
         import onnxruntime as ort
         if not onnx_path.exists():
             raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
-        # Force CPUExecutionProvider for ONNX Runtime to avoid cuDNN version conflicts with PyTorch/YOLOv8
+        # CPU only, otherwise ONNX Runtime's cuDNN clashes with the one PyTorch/YOLOv8 loads.
         providers = ["CPUExecutionProvider"]
         self.session = ort.InferenceSession(str(onnx_path), providers=providers)
         self.input_name = self.session.get_inputs()[0].name
@@ -109,7 +80,7 @@ class OnnxInferenceSession:
         logger.info("ONNX loaded: %s  providers=%s", onnx_path, providers)
 
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
-        """features: (1, seq_len, 18) float32 → softmax probs (1, 3)."""
+        """Softmax probabilities (1, 3) from a (1, seq_len, 18) feature batch."""
         logits = self.session.run(
             [self.output_name], {self.input_name: features.astype(np.float32)}
         )[0]
@@ -276,7 +247,7 @@ class SurveillancePipeline:
                 try:
                     self._yolo.close()
                 except Exception as e:
-                    logger.warning("Error closing model during pipeline initialization abort: %s", e)
+                    logger.warning("Failed to close model during init: %s", e)
             raise
 
         self._feature_buffer: Deque[np.ndarray] = deque(maxlen=seq_len)
@@ -290,7 +261,7 @@ class SurveillancePipeline:
         self._extractor_skip = feature_cfg.get("skip_frames", 2)
         self._current_feats: Dict[str, float] = {}
         self._current_driver_box: Optional[np.ndarray] = None
-        # key=event_type → {"frames": [], "remaining": int, "trigger": dict}
+        # key=event_type -> {"frames": [], "remaining": int, "trigger": dict}
         self._collecting_post: Dict[str, Dict[str, Any]] = {}
         self._fps_times: Deque[float] = deque(maxlen=60)
         self._recent_saved: Deque[str] = deque(maxlen=5)
@@ -302,7 +273,7 @@ class SurveillancePipeline:
         self._norm_std = std
 
     def run(self) -> None:
-        logger.info("Surveillance started — q=quit  r=reset  h=help")
+        logger.info("Surveillance started. q=quit  r=reset  h=help")
         window = "DMS Surveillance"
         if self._display:
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
@@ -322,7 +293,7 @@ class SurveillancePipeline:
                 timestamp_ms = int(self._frame_count * (1000.0 / self._fps))
                 timestamp_s = timestamp_ms / 1000.0
 
-                # Stage 1: person detection + driver isolation (optimize YOLO call frequency)
+                # Stage 1: person detection + driver isolation. Re-run YOLO only periodically.
                 redetect_every = self._yolo_cfg.get("redetect_every_n_frames", 30)
                 should_run_yolo_person = (
                     self._tracker._tracked_box is None
@@ -354,7 +325,7 @@ class SurveillancePipeline:
                 # Push to clip ring buffer (raw frame, before any crop)
                 self._clip_writer.push_frame(raw_frame, timestamp_s)
 
-                # Stage 2: MediaPipe + DriverStateNet (optimize CPU by skipping MediaPipe extraction)
+                # Stage 2: MediaPipe + DriverStateNet. MediaPipe extraction is throttled to save CPU.
                 probs = self._current_probs
                 feats = self._current_feats
                 if driver_box is not None:
@@ -366,7 +337,7 @@ class SurveillancePipeline:
                     if roi.size > 0:
                         preprocessed = preprocess_frame(roi)
                         
-                        # Only run MediaPipe FaceLandmarker once every self._extractor_skip frames, reuse otherwise
+                        # Run FaceLandmarker every _extractor_skip frames; reuse the last features otherwise.
                         if self._frame_count % self._extractor_skip == 0 or not self._current_feats:
                             feats = self._extractor.extract(preprocessed, timestamp_ms)
                             self._current_feats = feats
@@ -387,7 +358,7 @@ class SurveillancePipeline:
                                 self._current_state = LABEL_NAMES[int(np.argmax(probs))]
                                 self._current_probs = probs
 
-                # Stage 3: object detection in driver ROI (optimize frequency to run every 5 frames)
+                # Stage 3: object detection in driver ROI, every 5 frames to keep cost down.
                 if driver_box is not None and self._frame_count % 5 == 0:
                     if self._backend == "hailo":
                         self._current_object_scores, self._current_detected_objects = (
@@ -586,8 +557,8 @@ def main() -> None:
     logger.info("  Backend:   %s", args.backend)
     if args.backend == "hailo":
         logger.info("  HEF:       %s", hef_path)
-    logger.info("  Clips →    %s", _PROJECT_ROOT / clips_cfg.get("output_dir", "output/clips"))
-    logger.info("  Logs  →    %s", _PROJECT_ROOT / logging_cfg.get("output_dir", "output/logs"))
+    logger.info("  Clips:     %s", _PROJECT_ROOT / clips_cfg.get("output_dir", "output/clips"))
+    logger.info("  Logs:      %s", _PROJECT_ROOT / logging_cfg.get("output_dir", "output/logs"))
     logger.info("=" * 60)
 
     pipeline.run()

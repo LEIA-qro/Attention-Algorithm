@@ -1,49 +1,9 @@
-"""
-custom_detection.py — Custom Driver Tracker and Selfie Mode logic
-==================================================================
-
-Public API
-----------
-- ``custom_score_driver_candidate(box, frame_w, frame_h, drive_side, weights, selfie) -> float``
-- ``CustomDriverTracker(cfg, frame_w, frame_h)``
-    - ``.update(person_boxes, frame_count) -> ndarray | None``
-    - ``.reset()``
-"""
+"""Driver tracker with selfie-mode (mirrored drive side) support."""
 
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
-from src.detection import DriverTracker, score_driver_candidate, iou
-
-__all__ = [
-    "custom_score_driver_candidate",
-    "CustomDriverTracker",
-]
-
-
-def custom_score_driver_candidate(
-    box: np.ndarray,
-    frame_w: int,
-    frame_h: int,
-    drive_side: str,
-    weights: Dict[str, float],
-    selfie: bool = False,
-) -> float:
-    """Heuristic score for how likely a bounding box is the driver.
-    Behaves exactly like score_driver_candidate, but inverts drive_side
-    when selfie is True.
-    """
-    effective_drive_side = drive_side
-    if selfie:
-        effective_drive_side = "right" if drive_side == "left" else "left"
-
-    return score_driver_candidate(
-        box=box,
-        frame_w=frame_w,
-        frame_h=frame_h,
-        drive_side=effective_drive_side,
-        weights=weights,
-    )
+from src.detection import DriverTracker
 
 
 class CustomDriverTracker(DriverTracker):
@@ -58,10 +18,7 @@ class CustomDriverTracker(DriverTracker):
         person_boxes: List[Tuple[np.ndarray, float]],
         frame_count: int,
     ) -> Optional[np.ndarray]:
-        """Update tracker with new person detections.
-        Overrides DriverTracker.update to temporarily toggle self._drive_side
-        during the call to super().update() if selfie mode is enabled.
-        """
+        """Track the driver across detections, mirroring drive side in selfie mode."""
         if self._selfie:
             original_side = self._drive_side
             self._drive_side = "right" if original_side == "left" else "left"

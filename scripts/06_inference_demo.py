@@ -1,33 +1,11 @@
 #!/usr/bin/env python3
 
-"""
-06_inference_demo.py — Real-Time Driver Monitoring Demo
-========================================================
-
-Full inference pipeline:
-
-    Webcam → CLAHE → MediaPipe Face Landmarker v2 → Feature Extraction
-           → Rolling 90-frame buffer → ONNX DriverStateNet → State
-
-Overlay:
-  - Colour-coded state badge (green=Alert, yellow=Drowsy, red=Distracted)
-  - Feature gauges (EAR, MAR, PERCLOS, head pose)
-  - Explainability text ("Eyes closed for 1.8s", "Head turned 45° right")
-  - Per-class confidence bars
-  - Impairment proxy warning
-  - FPS counter
-
-Controls:
-  - 'q'   Quit
-  - 'c'   Recalibrate EAR baseline
-  - 'r'   Reset all state
-  - 'm'   Toggle mute audio alerts
-  - 'h'   Toggle help overlay
+"""Real-time driver monitoring demo: webcam -> features -> ONNX DriverStateNet, with an overlay HUD.
 
 Usage:
     python scripts/06_inference_demo.py --config config/config.yaml
     python scripts/06_inference_demo.py --onnx models/driver_state_net.onnx
-    python scripts/06_inference_demo.py --source 0               # webcam 0
+    python scripts/06_inference_demo.py --source 0
     python scripts/06_inference_demo.py --source path/to/video.mp4
 """
 
@@ -81,7 +59,7 @@ IMPAIRMENT_DEFAULTS = {
 
 def _setup_logging(level: str = "INFO") -> None:
     numeric = getattr(logging, level.upper(), logging.INFO)
-    fmt = "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s"
+    fmt = "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s"
     logging.basicConfig(level=numeric, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
@@ -153,16 +131,7 @@ class OnnxInferenceSession:
         logger.info("ONNX model loaded: %s", onnx_path)
 
     def predict(self, features: np.ndarray) -> np.ndarray:
-        """Run inference on a batch of feature sequences.
-
-        Parameters
-        ----------
-        features : np.ndarray, shape (batch, seq_len, num_features)
-
-        Returns
-        -------
-        logits : np.ndarray, shape (batch, num_classes)
-        """
+        """Run the ONNX model on a (batch, seq_len, num_features) array and return class logits."""
         logits = self.session.run(
             [self.output_name],
             {self.input_name: features.astype(np.float32)},
@@ -204,12 +173,9 @@ class OverlayRenderer:
         badge_w, badge_h = 280, 70
         cv2.rectangle(overlay, (10, 10), (10 + badge_w, 10 + badge_h), colour, -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-        # Border
         cv2.rectangle(frame, (10, 10), (10 + badge_w, 10 + badge_h), colour, 2)
-        # Text
         text = f"{state.upper()}"
         cv2.putText(frame, text, (25, 55), self.font, 1.2, (255, 255, 255), 2)
-        # Confidence
         conf_text = f"{confidence:.0%}"
         cv2.putText(frame, conf_text, (200, 55), self.font, 0.8, (255, 255, 255), 2)
 
@@ -226,24 +192,20 @@ class OverlayRenderer:
             y = y_start + i * (bar_h + 10)
             colour = LABEL_COLOURS.get(name, (200, 200, 200))
 
-            # Label
             cv2.putText(
                 frame, f"{name}:", (bar_x - 5, y + 15),
                 self.font_small, 1.1, (220, 220, 220), 1,
             )
 
-            # Background bar
             cv2.rectangle(
                 frame, (bar_x + 80, y), (bar_x + 80 + bar_w, y + bar_h),
                 (60, 60, 60), -1,
             )
-            # Filled bar
             fill_w = int(bar_w * prob)
             cv2.rectangle(
                 frame, (bar_x + 80, y), (bar_x + 80 + fill_w, y + bar_h),
                 colour, -1,
             )
-            # Percentage
             cv2.putText(
                 frame, f"{prob:.0%}", (bar_x + 80 + bar_w + 5, y + 15),
                 self.font_small, 1.0, (200, 200, 200), 1,
@@ -274,13 +236,11 @@ class OverlayRenderer:
             y = y_start + i * gap
             val = features.get(key, 0.0)
 
-            # Normalise to [0, 1]
             if vmax - vmin > 1e-6:
                 norm = np.clip((val - vmin) / (vmax - vmin), 0.0, 1.0)
             else:
                 norm = 0.0
 
-            # Label
             display_val = f"{val:.2f}" if abs(val) < 100 else f"{val:.0f}"
             cv2.putText(
                 frame, f"{label}: {display_val}",
@@ -288,13 +248,12 @@ class OverlayRenderer:
                 (180, 180, 180), 1,
             )
 
-            # Bar background
             bx = x_start + 110
             cv2.rectangle(frame, (bx, y), (bx + bar_w, y + bar_h), (50, 50, 50), -1)
 
-            # Bar fill — colour based on danger level
+            # Fill colour signals danger level; direction depends on the metric.
             if key in ("perclos", "gaze_stability", "eyes_off_road_pct"):
-                # Higher is worse
+                # Higher is worse.
                 if norm > 0.7:
                     fill_col = (0, 0, 220)
                 elif norm > 0.4:
@@ -302,7 +261,7 @@ class OverlayRenderer:
                 else:
                     fill_col = (0, 200, 0)
             elif key in ("ear_avg",):
-                # Lower is worse
+                # Lower is worse.
                 if norm < 0.3:
                     fill_col = (0, 0, 220)
                 elif norm < 0.5:
@@ -326,9 +285,8 @@ class OverlayRenderer:
         y_start = self.h - 20 - len(explanations) * 22
         for i, text in enumerate(explanations):
             y = y_start + i * 22
-            # Shadow
+            # Draw a dark offset copy first so text stays readable over any background.
             cv2.putText(frame, text, (12, y + 1), self.font_small, 1.1, (0, 0, 0), 2)
-            # Text
             cv2.putText(frame, text, (10, y), self.font_small, 1.1, (255, 255, 200), 1)
 
     def draw_fps(self, frame: np.ndarray, fps: float) -> None:
@@ -341,7 +299,7 @@ class OverlayRenderer:
 
     def draw_impairment_warning(self, frame: np.ndarray) -> None:
         """Draw a flashing impairment warning banner."""
-        # Flash effect — alternate visibility
+        # Flash the banner by toggling visibility a few times per second.
         if int(time.time() * 3) % 2 == 0:
             overlay = frame.copy()
             banner_h = 50
@@ -404,7 +362,6 @@ def generate_explanations(
     blink_rate = features.get("blink_rate", 0.0)
     blink_dur = features.get("blink_duration_avg", 0.0)
     mouth_frames = features.get("mouth_open_duration", 0.0)
-    eyes_off = features.get("eyes_off_road_pct", 0.0)
     head_nods = features.get("head_nod_count", 0.0)
 
     # Eye closure
@@ -425,7 +382,7 @@ def generate_explanations(
     # Head turn (distraction)
     if abs(yaw) > 30:
         direction = "right" if yaw > 0 else "left"
-        explanations.append(f"Head turned {abs(yaw):.0f}° {direction}")
+        explanations.append(f"Head turned {abs(yaw):.0f} deg {direction}")
 
     # Head nod (drowsiness)
     if head_nods >= 2:
@@ -433,7 +390,7 @@ def generate_explanations(
 
     # Head pitch down
     if pitch < -20:
-        explanations.append(f"Head drooping (pitch={pitch:.0f}°)")
+        explanations.append(f"Head drooping (pitch={pitch:.0f} deg)")
 
     # Gaze off road
     # if eyes_off > 0.5:
@@ -451,7 +408,7 @@ def generate_explanations(
 
     # Gaze instability
     if gaze_stability > 8.0:
-        explanations.append(f"Gaze unstable (σ={gaze_stability:.1f}°)")
+        explanations.append(f"Gaze unstable (sigma={gaze_stability:.1f} deg)")
 
     # Limit to top 4 most important
     return explanations[:4]
@@ -464,10 +421,7 @@ def check_impairment_proxy(
     state: str,
     thresholds: Optional[Dict[str, float]] = None,
 ) -> bool:
-    """Heuristic impairment proxy: drowsy + unstable gaze + abnormal blinks.
-
-    Returns True if at least 3 of 4 signals are present.
-    """
+    """True when at least 3 of 4 impairment signals (drowsy, unstable gaze, abnormal blinks, head bobbing) fire."""
     if thresholds is None:
         thresholds = IMPAIRMENT_DEFAULTS
 
@@ -646,32 +600,21 @@ class InferenceDemo:
         pred_idx = int(np.argmax(probs))
         state = LABEL_NAMES[pred_idx]
 
-        # Heuristic Overrides
-        # The webcam placement might differ from the training data, so we
-        # add manual rules to force Distracted if the angles are large enough.
+        # Webcam placement can differ from training data, so force Distracted on large head angles.
         if state == "Alert" and self._current_features:
             raw = self._current_features
-            yaw = abs(raw.get("yaw", 0.0))
-            pitch = raw.get("pitch", 0.0)
-            # ── Axis Swap Explanation ──
-            # The features were extracted in features.py with swapped names relative 
-            # to physical reality due to MediaPipe's rotation matrix coordinates.
-            #   raw["yaw"]   -> Physical Roll (tilting head side to side)
-            #   raw["roll"]  -> Physical Pitch (looking up / down)
-            
+            # features.py names are swapped vs physical axes: raw yaw is physical roll, raw roll is physical pitch.
             phys_yaw = raw.get("pitch", 0.0) - self._baseline_yaw
             phys_pitch = raw.get("roll", 0.0) - self._baseline_pitch
-            gaze_pitch = raw.get("gaze_pitch", 0.0)  # Gaze already tends to be centered relative to eyes
+            gaze_pitch = raw.get("gaze_pitch", 0.0)
             ear = raw.get("ear_avg", 1.0)
-            
+
             heuristic_distracted = False
-            
-            # 1. Looking significantly to the side
+
+            # Looking sharply to the side.
             if abs(phys_yaw) > 30.0:
                 heuristic_distracted = True
-            
-            # 2. Looking down at a cellphone (eyes angled sharply down)
-            # Or if head is pitched significantly
+            # Looking down at a phone: head pitched, gaze angled down, or eyes near-closed while facing forward.
             elif abs(phys_pitch) > 25.0 or abs(gaze_pitch) > 40.0 or (ear < 0.35 and abs(phys_yaw) < 15.0):
                 heuristic_distracted = True
 
@@ -680,8 +623,7 @@ class InferenceDemo:
             else:
                 self._distracted_frames = max(0, self._distracted_frames - self.classify_every)
 
-            # Only trigger heuristic override if sustained for ~1.5 seconds (45 frames at 30fps)
-            # This prevents quick shoulder checks from flashing "Distracted"
+            # Require ~1.5s sustained (45 frames @30fps) so quick shoulder checks don't flash Distracted.
             if self._distracted_frames > 45:
                 state = "Distracted"
                 probs = np.array([0.05, 0.05, 0.90], dtype=np.float32)
@@ -712,7 +654,7 @@ class InferenceDemo:
             return
         if not self._alert_active:
             return
-        # Don't spam — max once per 2 seconds
+        # Don't spam: at most one alert every 2 seconds.
         if timestamp - self._last_audio_time < 2.0:
             return
         try:
@@ -723,7 +665,7 @@ class InferenceDemo:
 
     def run(self) -> None:
         """Main demo loop."""
-        logger.info("Starting inference demo — press 'q' to quit, 'h' for help")
+        logger.info("Starting inference demo - press 'q' to quit, 'h' for help")
 
         window_name = "DMS - Driver Monitoring System"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -731,7 +673,6 @@ class InferenceDemo:
 
         try:
             while True:
-                t_start = time.perf_counter()
                 ret, frame = self.cap.read()
                 if not ret:
                     if self._frame_count < 10:
@@ -812,7 +753,7 @@ class InferenceDemo:
                 # Handle key presses
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
-                    logger.info("User pressed 'q' — exiting")
+                    logger.info("User pressed 'q' - exiting")
                     break
                 elif key == ord("c"):
                     logger.info("Recalibrating EAR and Baseline Pose...")
@@ -836,7 +777,7 @@ class InferenceDemo:
                     self._show_help = not self._show_help
 
         except KeyboardInterrupt:
-            logger.info("KeyboardInterrupt — exiting")
+            logger.info("KeyboardInterrupt - exiting")
         finally:
             self.cap.release()
             cv2.destroyAllWindows()

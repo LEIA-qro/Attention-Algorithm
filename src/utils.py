@@ -1,30 +1,4 @@
-"""
-utils.py — Logging, Metrics, Plotting & Checkpointing Utilities for DMS
-========================================================================
-
-A grab-bag of production utilities used throughout the training pipeline.
-
-Public API
-----------
-Logging
-  - ``setup_logging(log_dir, level, console, file)``
-Reproducibility
-  - ``seed_everything(seed)``
-Checkpointing
-  - ``save_checkpoint(state, filepath)``
-  - ``load_checkpoint(filepath, model, optimizer, scheduler)``
-Metrics
-  - ``MetricsTracker``   — epoch-level loss / accuracy / F1 tracker
-  - ``compute_class_weights(labels, num_classes)``
-Plotting
-  - ``plot_confusion_matrix(y_true, y_pred, class_names, save_path)``
-  - ``plot_roc_curves(y_true, y_score, class_names, save_path)``
-  - ``plot_training_curves(tracker, save_path)``
-Training helpers
-  - ``EarlyStopping``
-"""
-
-from __future__ import annotations
+"""Shared training helpers: logging setup, seeding, checkpointing, metrics tracking, and plots."""
 
 import logging
 import os
@@ -35,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import matplotlib
-matplotlib.use("Agg")  # Non-interactive backend — safe for servers
+matplotlib.use("Agg")  # Non-interactive backend, safe for headless servers.
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -51,23 +25,8 @@ from sklearn.metrics import (
     roc_curve,
 )
 
-__all__ = [
-    "setup_logging",
-    "seed_everything",
-    "save_checkpoint",
-    "load_checkpoint",
-    "MetricsTracker",
-    "compute_class_weights",
-    "plot_confusion_matrix",
-    "plot_roc_curves",
-    "plot_training_curves",
-    "EarlyStopping",
-]
-
 logger = logging.getLogger(__name__)
 
-
-# Logging
 
 def setup_logging(
     log_dir: Union[str, Path] = "logs",
@@ -76,34 +35,15 @@ def setup_logging(
     file: bool = True,
     log_filename: str = "training.log",
 ) -> logging.Logger:
-    """Configure the root logger with optional file and console handlers.
-
-    Parameters
-    ----------
-    log_dir : str or Path
-        Directory for log files. Created if it doesn't exist.
-    level : str
-        Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-    console : bool
-        Attach a StreamHandler (stderr) if True.
-    file : bool
-        Attach a FileHandler if True.
-    log_filename : str
-        Name of the log file inside ``log_dir``.
-
-    Returns
-    -------
-    logging.Logger
-        The configured root logger.
-    """
+    """Configure the root logger with optional file and console handlers."""
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    # Clear existing handlers to avoid duplicates on re-init
+    # Clear existing handlers so re-init doesn't duplicate them.
     root.handlers.clear()
 
     fmt = logging.Formatter(
-        "[%(asctime)s] %(levelname)-8s %(name)s — %(message)s",
+        "[%(asctime)s] %(levelname)-8s %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -125,18 +65,8 @@ def setup_logging(
     return root
 
 
-# Reproducibility
-
 def seed_everything(seed: int = 42) -> None:
-    """Set seeds for Python, NumPy, and PyTorch for reproducibility.
-
-    Also configures CuDNN for deterministic behaviour (may reduce perf).
-
-    Parameters
-    ----------
-    seed : int
-        Global random seed.
-    """
+    """Seed Python, NumPy, and PyTorch and force deterministic CuDNN (may reduce perf)."""
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
@@ -147,27 +77,11 @@ def seed_everything(seed: int = 42) -> None:
     logger.info("Random seed set to %d (deterministic mode)", seed)
 
 
-# Checkpointing
-
 def save_checkpoint(
     state: Dict[str, Any],
     filepath: Union[str, Path],
 ) -> Path:
-    """Save a training checkpoint.
-
-    Parameters
-    ----------
-    state : dict
-        Must include at minimum ``"model_state_dict"`` and ``"epoch"``.
-        Commonly also includes optimizer, scheduler, and metrics.
-    filepath : str or Path
-        Destination file path (e.g. ``checkpoints/best.pt``).
-
-    Returns
-    -------
-    Path
-        Absolute path of the saved file.
-    """
+    """Save a training checkpoint and return its absolute path."""
     filepath = Path(filepath)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     torch.save(state, filepath)
@@ -183,26 +97,7 @@ def load_checkpoint(
     scheduler: Optional[Any] = None,
     device: Union[str, torch.device] = "cpu",
 ) -> Dict[str, Any]:
-    """Load a training checkpoint and restore model / optimizer state.
-
-    Parameters
-    ----------
-    filepath : str or Path
-        Path to the ``.pt`` checkpoint file.
-    model : nn.Module
-        Model whose state_dict will be loaded.
-    optimizer : Optimizer, optional
-        If provided, optimizer state is restored.
-    scheduler : LR scheduler, optional
-        If provided, scheduler state is restored.
-    device : str or torch.device
-        Device to map tensors to.
-
-    Returns
-    -------
-    dict
-        The full checkpoint dict (contains ``"epoch"``, metrics, etc.).
-    """
+    """Load a training checkpoint and restore model, optimizer, and scheduler state."""
     filepath = Path(filepath)
     if not filepath.exists():
         raise FileNotFoundError(f"Checkpoint not found: {filepath}")
@@ -226,29 +121,15 @@ def load_checkpoint(
     return checkpoint
 
 
-# Metrics Tracker
-
 @dataclass
 class MetricsTracker:
-    """Tracks training and validation metrics across epochs.
-
-    Stores per-epoch values for loss, accuracy, precision, recall,
-    and macro-F1 for both train and val splits.
-
-    Example
-    -------
-    >>> tracker = MetricsTracker(num_classes=3, class_names=["A","D","X"])
-    >>> tracker.update("train", epoch=0, loss=0.9, y_true=[0,1], y_pred=[0,1])
-    >>> tracker.update("val", epoch=0, loss=0.7, y_true=[0,2], y_pred=[0,2])
-    >>> print(tracker.best_val_f1())
-    """
+    """Tracks per-epoch loss, accuracy, precision, recall, and macro-F1 for train and val splits."""
 
     num_classes: int = 3
     class_names: List[str] = field(
         default_factory=lambda: ["Alert", "Drowsy", "Distracted"]
     )
 
-    # Internal storage
     _history: Dict[str, Dict[str, List[float]]] = field(
         default_factory=lambda: {
             "train": {
@@ -282,26 +163,7 @@ class MetricsTracker:
         y_pred: Sequence[int],
         y_score: Optional[np.ndarray] = None,
     ) -> Dict[str, float]:
-        """Record metrics for one epoch.
-
-        Parameters
-        ----------
-        split : str
-            ``"train"`` or ``"val"``.
-        epoch : int
-            Current epoch number.
-        loss : float
-            Average loss for the epoch.
-        y_true, y_pred : array-like
-            Ground-truth and predicted labels (integer).
-        y_score : np.ndarray, optional
-            Predicted probabilities (B, C) for ROC-AUC computation.
-
-        Returns
-        -------
-        dict
-            Computed metrics for this epoch.
-        """
+        """Record metrics for one epoch and return them."""
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
 
@@ -365,36 +227,18 @@ class MetricsTracker:
         return dict(self._history[split])
 
 
-# Class Weight Computation
-
 def compute_class_weights(
     labels: Union[Sequence[int], np.ndarray, torch.Tensor],
     num_classes: int = 3,
     method: str = "inverse_freq",
 ) -> torch.Tensor:
-    """Compute class weights for imbalanced datasets.
-
-    Parameters
-    ----------
-    labels : array-like of int
-        All training labels.
-    num_classes : int
-        Total number of classes.
-    method : str
-        ``"inverse_freq"`` — weight ∝ 1/count.
-        ``"effective_num"`` — effective number of samples (Cui et al. 2019).
-
-    Returns
-    -------
-    torch.Tensor, shape (num_classes,)
-        Normalised class weights (sum = num_classes).
-    """
+    """Class weights for imbalanced data: "inverse_freq" (1/count) or "effective_num" (Cui et al. 2019)."""
     if isinstance(labels, torch.Tensor):
         labels = labels.numpy()
     labels = np.asarray(labels, dtype=np.int64)
 
     counts = np.bincount(labels, minlength=num_classes).astype(np.float64)
-    counts = np.maximum(counts, 1.0)  # avoid division by zero
+    counts = np.maximum(counts, 1.0)  # floor at 1 so empty classes don't divide by zero.
 
     if method == "inverse_freq":
         weights = 1.0 / counts
@@ -405,14 +249,11 @@ def compute_class_weights(
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    # Normalise so weights sum to num_classes
     weights = weights / weights.sum() * num_classes
     w = torch.tensor(weights, dtype=torch.float32)
     logger.info("Class weights (%s): %s", method, w.tolist())
     return w
 
-
-# Plotting
 
 def plot_confusion_matrix(
     y_true: Sequence[int],
@@ -423,27 +264,7 @@ def plot_confusion_matrix(
     title: str = "Confusion Matrix",
     figsize: Tuple[int, int] = (8, 6),
 ) -> plt.Figure:
-    """Plot (and optionally save) a confusion matrix heatmap.
-
-    Parameters
-    ----------
-    y_true, y_pred : array-like of int
-        Ground-truth and predicted labels.
-    class_names : list of str
-        Display names for each class.
-    save_path : str or Path, optional
-        If given, the figure is saved here (PNG).
-    normalise : bool
-        Show row-normalised percentages.
-    title : str
-        Figure title.
-    figsize : tuple
-        Figure size in inches.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
+    """Plot, and optionally save, a confusion matrix heatmap."""
     cm = confusion_matrix(y_true, y_pred, labels=list(range(len(class_names))))
 
     if normalise:
@@ -488,25 +309,7 @@ def plot_roc_curves(
     save_path: Optional[Union[str, Path]] = None,
     figsize: Tuple[int, int] = (8, 6),
 ) -> plt.Figure:
-    """Plot per-class ROC curves with AUC scores.
-
-    Parameters
-    ----------
-    y_true : array-like of int
-        Ground-truth integer labels.
-    y_score : np.ndarray, shape (N, num_classes)
-        Predicted class probabilities (softmax output).
-    class_names : list of str
-        Display names for each class.
-    save_path : str or Path, optional
-        If given, save figure here.
-    figsize : tuple
-        Figure size.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
+    """Plot per-class ROC curves with AUC scores."""
     y_true = np.asarray(y_true)
     num_classes = len(class_names)
 
@@ -553,21 +356,7 @@ def plot_training_curves(
     save_path: Optional[Union[str, Path]] = None,
     figsize: Tuple[int, int] = (14, 10),
 ) -> plt.Figure:
-    """Plot training and validation loss, accuracy, and F1 over epochs.
-
-    Parameters
-    ----------
-    tracker : MetricsTracker
-        A fully populated metrics tracker.
-    save_path : str or Path, optional
-        If given, save the figure.
-    figsize : tuple
-        Figure size.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
+    """Plot training and validation loss, accuracy, and F1 over epochs."""
     train_hist = tracker.get_history("train")
     val_hist = tracker.get_history("val")
     epochs = range(1, len(train_hist["loss"]) + 1)
@@ -636,32 +425,8 @@ def plot_training_curves(
     return fig
 
 
-# Early Stopping
-
 class EarlyStopping:
-    """Early stopping to halt training when validation metric plateaus.
-
-    Parameters
-    ----------
-    patience : int
-        Number of epochs with no improvement before stopping.
-    min_delta : float
-        Minimum change to qualify as an improvement.
-    mode : str
-        ``"max"`` — higher is better (e.g. F1).
-        ``"min"`` — lower is better (e.g. loss).
-    verbose : bool
-        Log when patience counter increments.
-
-    Example
-    -------
-    >>> es = EarlyStopping(patience=10, mode="max")
-    >>> for epoch in range(100):
-    ...     val_f1 = train_one_epoch(...)
-    ...     if es(val_f1):
-    ...         print("Stopping!")
-    ...         break
-    """
+    """Stop training when the validation metric stops improving for `patience` epochs (mode "max" or "min")."""
 
     def __init__(
         self,
@@ -688,20 +453,7 @@ class EarlyStopping:
             return current < best - self.min_delta
 
     def __call__(self, metric: float, epoch: int = 0) -> bool:
-        """Check whether to stop training.
-
-        Parameters
-        ----------
-        metric : float
-            Current epoch's validation metric.
-        epoch : int
-            Current epoch number (for logging).
-
-        Returns
-        -------
-        bool
-            ``True`` if training should stop.
-        """
+        """Return True if training should stop."""
         if self.best_score is None:
             self.best_score = metric
             self.best_epoch = epoch

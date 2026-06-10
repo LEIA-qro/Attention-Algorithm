@@ -1,25 +1,7 @@
-"""
-hailo_backend.py — Hailo-8 YOLO inference shim
-================================================
+"""Hailo-8 YOLO inference backend used when --backend hailo is passed.
 
-Replaces ultralytics YOLO calls with hailo_platform SDK calls.
-Only used when --backend hailo is passed to 08_surveillance.py.
-
-Requirements
-------------
-- hailo_platform Python SDK installed (Pi only)
-- A compiled .hef file (see plan Task 6 prerequisites)
-
-Public API (mirrors detection.py)
-----------------------------------
-- load_hailo_yolo(hef_path: str) -> HailoYOLO
-- detect_persons_hailo(model, frame, conf_thresh, person_class_id, imgsz)
-      -> list[tuple[ndarray, float]]
-- detect_objects_in_roi_hailo(model, frame, driver_box, cfg)
-      -> tuple[dict[str, float], list[dict]]
-- _preprocess_for_hailo(frame, imgsz) -> ndarray   (exposed for testing)
-- _parse_hailo_detections(raw, conf_thresh, target_classes)
-      -> list[tuple[ndarray, float, int]]           (exposed for testing)
+Mirrors the detect_* API in detection.py but talks to the hailo_platform SDK.
+Needs the SDK installed and a compiled .hef (Raspberry Pi only).
 """
 
 from __future__ import annotations
@@ -46,14 +28,6 @@ except (ImportError, ModuleNotFoundError, TypeError):
     _HAILO_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
-__all__ = [
-    "load_hailo_yolo",
-    "detect_persons_hailo",
-    "detect_objects_in_roi_hailo",
-    "_preprocess_for_hailo",
-    "_parse_hailo_detections",
-]
 
 
 class HailoYOLO:
@@ -98,13 +72,11 @@ class HailoYOLO:
         if self._active_context is not None:
             return
 
-        # Activate the network group context
         active_context = self._network_group.activate(self._network_group_params)
         active_context.__enter__()
         self._active_context = active_context
 
         try:
-            # Start the InferVStreams context
             infer_pipeline = InferVStreams(
                 self._network_group,
                 self._input_vstream_params,
@@ -113,7 +85,7 @@ class HailoYOLO:
             infer_pipeline.__enter__()
             self._infer_pipeline = infer_pipeline
         except Exception:
-            # Clean up active_context if InferVStreams fails
+            # Tear down the activation if the stream pipeline fails to start.
             try:
                 active_context.__exit__(None, None, None)
             except Exception as e:
@@ -172,12 +144,7 @@ def _parse_hailo_detections(
     conf_thresh: float,
     target_classes: Set[int],
 ) -> List[Tuple[np.ndarray, float, int]]:
-    """Parse Hailo YOLOv8n output into (box_xyxy_norm, conf, cls_id) tuples.
-
-    Hailo YOLOv8n outputs a single tensor of shape (1, N, 6) where each row is
-    [x1_norm, y1_norm, x2_norm, y2_norm, conf, cls_id] in [0, 1] coordinates.
-    Only rows with conf >= conf_thresh and cls_id in target_classes are returned.
-    """
+    """Parse Hailo YOLOv8n output into (box_xyxy_norm, conf, cls_id) tuples."""
     detections: List[Tuple[np.ndarray, float, int]] = []
     if not raw_output:
         return detections
@@ -186,11 +153,11 @@ def _parse_hailo_detections(
     if tensor is None or tensor.size == 0:
         return detections
 
-    preds = tensor.reshape(-1, tensor.shape[-1])  # (N, 6)
+    # Each row is [x1_norm, y1_norm, x2_norm, y2_norm, conf, cls_id] in [0, 1].
+    preds = tensor.reshape(-1, tensor.shape[-1])
     if preds.shape[1] < 6:
         return detections
 
-    # NumPy vectorized filtering
     conf_mask = preds[:, 4] >= conf_thresh
     if target_classes:
         class_mask = np.isin(preds[:, 5].astype(int), list(target_classes))
