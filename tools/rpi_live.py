@@ -1,23 +1,8 @@
 #!/usr/bin/env python3
-"""
-rpi_live.py — La laptop hace de RPi usando el PIPELINE DEL EQUIPO + capa de nube.
+"""Corre el SurveillancePipeline del equipo en la laptop y alimenta la nube.
 
-Integra:
-  - DETECCIÓN del equipo: SurveillancePipeline (scripts/09_surveillance_custom.py)
-    = YOLOv8 (persona + objetos: celular/comida/peligro) + MediaPipe + LSTM +
-      motor de eventos (sustain/cooldown) + grabación de clips locales.
-  - CAPA DE NUBE (lo que era el sim): headless, NO crea sesión. Pola
-    GET /current-session; cuando la APP (celular) inicia el viaje, se engancha y
-    postea estados / incidentes / fotos a ESA sesión. Heartbeat de dispositivo.
-
-Así corre UN solo pipeline (el bueno del equipo) y además alimenta la nube.
-NO modifica el código del equipo — importa su SurveillancePipeline tal cual.
-
-SETUP: venv 3.11/3.12 con: mediapipe onnxruntime opencv-python numpy pyyaml ultralytics flask torch
-Uso:
-    python rpi_live.py                 # headless, espera a que el celular inicie el viaje
-    python rpi_live.py --no-selfie     # cámara no-selfie
-    python rpi_live.py --fake-gps      # track sintético (si no hay GPS del celular)
+Headless: no crea sesion, pola /current-session y cuando la app inicia el viaje
+se engancha y postea estados, incidentes y clips. No modifica el codigo del equipo.
 """
 from __future__ import annotations
 
@@ -228,7 +213,7 @@ def main() -> None:
     poll_every = 1.0
     state_rtt = {"ms": 0.0}  # último RTT del POST de estado (para diagnóstico)
     # Incidentes posteados esperando que su clip MP4 cierre (~5s post-evento).
-    # Cada uno: {"id", "event_type", "ts"} — correlacionamos por event_type.
+    # Cada uno: {"id", "event_type", "ts"}; correlacionamos por event_type.
     pending_clips: list[dict] = []
     gps = list(QRO)
     frame_i = 0
@@ -388,7 +373,7 @@ def main() -> None:
                 if triggers:
                     cv2.putText(disp, "EVENTO: " + ",".join(triggers), (10, 50),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.imshow("rpi_live — deteccion en vivo (q=salir)", disp)
+                cv2.imshow("rpi_live - deteccion en vivo (q=salir)", disp)
                 if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                     break
     except KeyboardInterrupt:

@@ -96,10 +96,7 @@ def _assert_session(conn, session_id: uuid.UUID) -> None:
         raise HTTPException(404, "session not found")
 
 
-# --- Capa de confirmación (P3): un estado no-Alert sostenido >= umbral por estado
-# se "confirma" como real y se registra como incidente (confirmed=TRUE). El umbral
-# es configurable desde la app (tabla config). Solo aplica a Drowsy/Distracted (el
-# estado continuo); los thresholds por objeto viven en el motor de eventos del edge.
+# confirma un estado no-Alert sostenido >= umbral configurable como incidente; solo Drowsy/Distracted
 def _threshold_for(conn, state: str) -> Optional[float]:
     row = conn.execute("SELECT drowsy_seconds, distracted_seconds FROM config WHERE id = 1").fetchone()
     if row is None:
@@ -247,9 +244,7 @@ class DeviceHeartbeat(BaseModel):
     kind: str = "camera"
 
 
-# Registro en memoria de dispositivos (edge) que reportan latido. Se resetea al
-# reiniciar la API; suficiente para la demo. Permite que el celular muestre que
-# hay una cámara/RPi disponible antes de iniciar el viaje.
+# latidos del edge en memoria (se resetea al reiniciar); marca camara/RPi disponible
 _devices: dict[str, dict] = {}
 _DEVICE_TTL_S = 12.0
 
@@ -458,9 +453,7 @@ def get_session(session_id: uuid.UUID):
             (session_id,),
         ).fetchall()
 
-    # La ubicación real la aporta el GPS del celular (track). Los incidentes del
-    # edge (RPi) llegan sin lat/lng → los ubicamos en el punto de track más cercano
-    # en el tiempo, para que caigan sobre la ruta real en el mapa.
+    # incidentes del edge sin lat/lng: los ubicamos en el punto de track mas cercano en el tiempo
     if track:
         for inc in incidents:
             if inc.get("lat") is None or inc.get("lng") is None:
