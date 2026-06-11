@@ -9,6 +9,9 @@ torchvision>=0.16
 mediapipe>=0.10.9
 opencv-python>=4.8
 ultralytics>=8.0.0
+# Fallback H.264 encoder for clip writing: bundles ffmpeg+libx264 via pip so
+# clips stay browser/WhatsApp-playable even when OpenCV lacks an H.264 encoder.
+imageio-ffmpeg>=0.4.9
 
 # scientific computing
 numpy>=1.24
