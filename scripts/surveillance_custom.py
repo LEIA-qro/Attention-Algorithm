@@ -386,6 +386,7 @@ class SurveillancePipeline:
                              self._yolo_cfg.get("roi_padding_px", 30),
                              self._frame_w, self._frame_h)
             x1, y1, x2, y2 = [int(v) for v in padded]
+            self._current_roi = (x1, y1, x2, y2)
             roi = raw_frame[y1:y2, x1:x2]
             if roi.size > 0:
                 preprocessed = preprocess_frame(roi)
@@ -554,16 +555,21 @@ class SurveillancePipeline:
 
         # Derive the face box for the UI from the last landmark result.
         face_box = None
-        if self._extractor._last_result and self._extractor._last_result.face_landmarks:
+        if self._extractor._last_result and self._extractor._last_result.face_landmarks and hasattr(self, "_current_roi"):
             try:
                 lms = self._extractor._last_result.face_landmarks[0]
-                h, w = raw_frame.shape[:2]
+                rx1, ry1, rx2, ry2 = self._current_roi
+                rw, rh = rx2 - rx1, ry2 - ry1
                 xs = [lm.x for lm in lms]
                 ys = [lm.y for lm in lms]
-                x1, y1 = int(min(xs) * w), int(min(ys) * h)
-                x2, y2 = int(max(xs) * w), int(max(ys) * h)
-                
+                # MediaPipe landmarks are normalised to the ROI crop, so scale by
+                # the ROI size and add its offset to map back to the full frame.
+                x1 = int(min(xs) * rw) + rx1
+                y1 = int(min(ys) * rh) + ry1
+                x2 = int(max(xs) * rw) + rx1
+                y2 = int(max(ys) * rh) + ry1
                 px, py = int(0.15 * (x2 - x1)), int(0.15 * (y2 - y1))
+                h, w = raw_frame.shape[:2]
                 face_box = [max(0, x1 - px), max(0, y1 - py), min(w, x2 + px), min(h, y2 + py)]
             except IndexError:
                 pass
