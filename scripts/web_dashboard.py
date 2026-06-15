@@ -19,6 +19,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "2"
 import argparse
 import json
 import logging
+import queue
 import re
 import socket
 import sys
@@ -865,19 +866,6 @@ def _cloud_get(base, path):
         return json.loads(r.read() or b"{}")
 
 
-def _cloud_post_async(base, path, body, rtt_holder=None):
-    def run():
-        t = time.time()
-        try:
-            _cloud_post(base, path, body)
-            if rtt_holder is not None:
-                rtt_holder["ms"] = (time.time() - t) * 1000.0
-        except Exception:
-            pass
-
-    threading.Thread(target=run, daemon=True).start()
-
-
 def _upload_snapshot(base, jpg_bytes):
     try:
         meta = _cloud_post(base, "/uploads/presign", {"ext": "jpg"})
@@ -907,6 +895,14 @@ def _clip_event_type(path):
 
 
 class CloudUplink:
+    """Pushes states/incidents/clips to the API on a dedicated worker thread.
+
+    All network I/O (session poll, state posts, incident posts, snapshot/clip
+    uploads) runs on ``_run``; the inference thread only calls ``step()``, which
+    stashes the latest telemetry and queues trigger events without ever touching
+    the network. This keeps a slow or unreachable API from stalling the model.
+    """
+
     def __init__(self, pipeline, base, name, state_every=0.4, clip_dir=None):
         self.pipeline = pipeline
         self.base = base
@@ -918,99 +914,171 @@ class CloudUplink:
         self.last_poll = self.last_hb = self.last_state = self.last_clip_scan = 0.0
         self.pending_clips = []
         self.rtt = {"ms": 0.0}
+        # Shared with the inference thread: latest telemetry (overwrite slot) and
+        # a queue of trigger events (must not be dropped).
+        self._latest = None
+        self._latest_lock = threading.Lock()
+        self._events: queue.Queue = queue.Queue()
+        self._calibrate_pending = False
+        self._worker = threading.Thread(target=self._run, daemon=True)
+        self._worker.start()
 
+    # --- inference thread: cheap, never blocks on the network ---
     def step(self, telemetry, frame):
+        # Run calibration on the inference thread (serialised with extract()),
+        # triggered by the worker when a new trip starts.
+        if self._calibrate_pending:
+            self._calibrate_pending = False
+            try:
+                self.pipeline.calibrate()
+            except Exception:
+                pass
+
         state = telemetry.get("state", "Alert")
         probs = telemetry.get("probs", {})
         conf = float(probs.get(state.lower(), 0.0))
-        triggers = telemetry.get("triggers", []) or []
-        now = time.time()
+        with self._latest_lock:
+            self._latest = (state, probs, conf)
 
-        if now - self.last_hb >= 3.0:
-            self.last_hb = now
-            _cloud_post_async(self.base, "/devices/heartbeat", {"name": self.name, "kind": "camera"})
+        # Only queue events while a trip is active; encode the snapshot here so
+        # it matches the trigger frame, but upload it on the worker.
+        if self.active_sid:
+            for evt in telemetry.get("triggers", []) or []:
+                enc_ok, jpg = cv2.imencode(".jpg", frame)
+                self._events.put({
+                    "evt": evt,
+                    "ts": _now_iso(),
+                    "probs": probs,
+                    "conf": conf,
+                    "jpg": jpg.tobytes() if enc_ok else None,
+                })
 
-        if now - self.last_poll >= 1.0:
-            self.last_poll = now
-            try:
-                cs = _cloud_get(self.base, "/current-session")
-                sid = cs.get("session_id") if cs.get("active") else None
-            except Exception:
-                sid = self.active_sid
-            if sid != self.active_sid:
-                if sid:
-                    self.active_sid = sid
-                    self.last_state = 0.0
-                    self.pending_clips.clear()
-                    if self.clip_dir and self.clip_dir.exists():
-                        self.seen_clips.update(p.name for p in self.clip_dir.glob("*.mp4"))
-                    try:
-                        self.pipeline.calibrate()
-                    except Exception:
-                        pass
-                    logger.info("Trip started: %s", self.active_sid)
-                else:
-                    logger.info("Trip ended: %s", self.active_sid)
-                    self.active_sid = None
-                    self.pending_clips.clear()
+    # --- worker thread: all network I/O lives here ---
+    def _run(self):
+        while True:
+            now = time.time()
+            self._heartbeat(now)
+            self._poll_session(now)
+            if self.active_sid:
+                self._post_state(now)
+                self._drain_events()
+                self._scan_clips(now)
+            else:
+                self._discard_events()
+            time.sleep(0.1)
 
-        if not self.active_sid:
+    def _heartbeat(self, now):
+        if now - self.last_hb < 3.0:
             return
+        self.last_hb = now
+        try:
+            _cloud_post(self.base, "/devices/heartbeat", {"name": self.name, "kind": "camera"})
+        except Exception:
+            pass
 
-        ts = _now_iso()
-        if (now - self.last_state) >= self.state_every:
-            _cloud_post_async(self.base, f"/sessions/{self.active_sid}/states",
-                              {"ts": ts, "state": state, "confidence": conf}, self.rtt)
-            self.last_state = now
+    def _poll_session(self, now):
+        if now - self.last_poll < 1.0:
+            return
+        self.last_poll = now
+        try:
+            cs = _cloud_get(self.base, "/current-session")
+            sid = cs.get("session_id") if cs.get("active") else None
+        except Exception:
+            return
+        if sid == self.active_sid:
+            return
+        if sid:
+            self.active_sid = sid
+            self.last_state = 0.0
+            self.pending_clips.clear()
+            if self.clip_dir and self.clip_dir.exists():
+                self.seen_clips.update(p.name for p in self.clip_dir.glob("*.mp4"))
+            self._calibrate_pending = True
+            logger.info("Trip started: %s", self.active_sid)
+        else:
+            logger.info("Trip ended: %s", self.active_sid)
+            self.active_sid = None
+            self.pending_clips.clear()
 
-        for evt in triggers:
-            inc_state = EVENT_TO_STATE.get(evt, "Distracted")
-            snap_key = None
-            enc_ok, jpg = cv2.imencode(".jpg", frame)
-            if enc_ok:
-                snap_key = _upload_snapshot(self.base, jpg.tobytes())
-            resp = _cloud_post(self.base, f"/sessions/{self.active_sid}/incidents", {
-                "ts": ts, "state": inc_state,
-                "confidence": float(probs.get(inc_state.lower(), conf)) or 0.9,
-                "speed_kmh": None,
-                "lat": None,
-                "lng": None,
-                "snapshot_key": snap_key,
-                "event_type": evt,
-                "harsh_event": False,
-            })
+    def _post_state(self, now):
+        if now - self.last_state < self.state_every:
+            return
+        with self._latest_lock:
+            latest = self._latest
+        if latest is None:
+            return
+        state, probs, conf = latest
+        self.last_state = now
+        t = time.time()
+        try:
+            _cloud_post(self.base, f"/sessions/{self.active_sid}/states",
+                        {"ts": _now_iso(), "state": state, "confidence": conf})
+            self.rtt["ms"] = (time.time() - t) * 1000.0
+        except Exception:
+            pass
+
+    def _discard_events(self):
+        try:
+            while True:
+                self._events.get_nowait()
+        except queue.Empty:
+            pass
+
+    def _drain_events(self):
+        while True:
+            try:
+                e = self._events.get_nowait()
+            except queue.Empty:
+                break
+            snap_key = _upload_snapshot(self.base, e["jpg"]) if e["jpg"] else None
+            inc_state = EVENT_TO_STATE.get(e["evt"], "Distracted")
+            try:
+                resp = _cloud_post(self.base, f"/sessions/{self.active_sid}/incidents", {
+                    "ts": e["ts"], "state": inc_state,
+                    "confidence": float(e["probs"].get(inc_state.lower(), e["conf"])) or 0.9,
+                    "speed_kmh": None,
+                    "lat": None,
+                    "lng": None,
+                    "snapshot_key": snap_key,
+                    "event_type": e["evt"],
+                    "harsh_event": False,
+                })
+            except Exception:
+                continue
             inc_id = resp.get("incident_id")
             if inc_id:
-                self.pending_clips.append({"id": inc_id, "event_type": evt, "ts": now})
+                self.pending_clips.append({"id": inc_id, "event_type": e["evt"], "ts": time.time()})
 
-        if (now - self.last_clip_scan) >= 1.5 and self.clip_dir and self.clip_dir.exists():
-            self.last_clip_scan = now
-            self.pending_clips[:] = [p for p in self.pending_clips if now - p["ts"] < 30.0]
-            for cp in sorted(self.clip_dir.glob("*.mp4")):
-                if cp.name in self.seen_clips:
-                    continue
+    def _scan_clips(self, now):
+        if now - self.last_clip_scan < 1.5 or not (self.clip_dir and self.clip_dir.exists()):
+            return
+        self.last_clip_scan = now
+        self.pending_clips[:] = [p for p in self.pending_clips if now - p["ts"] < 30.0]
+        for cp in sorted(self.clip_dir.glob("*.mp4")):
+            if cp.name in self.seen_clips:
+                continue
+            try:
+                st = cp.stat()
+            except OSError:
+                continue
+            if st.st_size == 0 or (now - st.st_mtime) < 2.0:
+                continue
+            evt_type = _clip_event_type(cp)
+            match = next((p for p in reversed(self.pending_clips)
+                          if p["event_type"] == evt_type and not p.get("matched")), None)
+            if match is None:
+                if (now - st.st_mtime) > 15.0:
+                    self.seen_clips.add(cp.name)
+                continue
+            key = _upload_clip(self.base, cp)
+            self.seen_clips.add(cp.name)
+            if key:
                 try:
-                    st = cp.stat()
-                except OSError:
-                    continue
-                if st.st_size == 0 or (now - st.st_mtime) < 2.0:
-                    continue
-                evt_type = _clip_event_type(cp)
-                match = next((p for p in reversed(self.pending_clips)
-                              if p["event_type"] == evt_type and not p.get("matched")), None)
-                if match is None:
-                    if (now - st.st_mtime) > 15.0:
-                        self.seen_clips.add(cp.name)
-                    continue
-                key = _upload_clip(self.base, cp)
-                self.seen_clips.add(cp.name)
-                if key:
-                    try:
-                        _cloud_post(self.base,
-                                    f"/sessions/{self.active_sid}/incidents/{match['id']}/clip", {"key": key})
-                        match["matched"] = True
-                    except Exception:
-                        pass
+                    _cloud_post(self.base,
+                                f"/sessions/{self.active_sid}/incidents/{match['id']}/clip", {"key": key})
+                    match["matched"] = True
+                except Exception:
+                    pass
 
 
 app = Flask(__name__)
