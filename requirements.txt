@@ -39,3 +39,5 @@ pygame>=2.5
 
 # web dashboard
 Flask>=2.0
+# Names cameras in the dashboard source picker (DirectShow enumeration, Windows).
+pygrabber>=0.2; sys_platform == "win32"

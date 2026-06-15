@@ -804,12 +804,23 @@ def _open_capture(source, res_w: int, res_h: int):
 
 
 def _probe_cameras(max_index: int = 8):
-    """Probe camera indices and return the ones that open.
+    """List available cameras for the dashboard's source picker.
 
-    Skips the currently active index (reopening it would steal the live capture)
-    but still reports it as available. Used by the dashboard's source picker so a
-    phone-via-OBS Virtual Camera can be selected once OBS is running.
+    On Windows it enumerates DirectShow devices by name via pygrabber, which does
+    NOT open any device (so it never disrupts the live capture) and gives real
+    names like "OBS Virtual Camera". The list index matches OpenCV's CAP_DSHOW
+    order. Elsewhere (or if pygrabber is missing) it falls back to probing indices
+    by briefly opening each one, skipping the active index.
     """
+    if sys.platform == "win32":
+        try:
+            from pygrabber.dshow_graph import FilterGraph
+
+            names = FilterGraph().get_input_devices()
+            return [{"source": str(i), "label": f"{i}: {n}"} for i, n in enumerate(names)]
+        except Exception as e:
+            logger.warning("pygrabber device enumeration failed (%s); probing by index.", e)
+
     found = []
     for i in range(max_index):
         if _active_source is not None and str(_active_source) == str(i):
