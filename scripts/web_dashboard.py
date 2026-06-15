@@ -37,7 +37,7 @@ import yaml
 import torch
 torch.set_num_threads(2)
 
-from flask import Flask, Response, render_template_string
+from flask import Flask, Response, render_template_string, request
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -491,6 +491,17 @@ body {
                     <input type="checkbox" id="toggle-face" checked style="accent-color: var(--accent); cursor: pointer;"> Prefer Face Box
                 </label>
             </div>
+            <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+                <label style="font-size: 13px; color: var(--text-secondary);">Camera source</label>
+                <div style="display: flex; gap: 8px;">
+                    <select id="camera-select" style="flex:1; background:#1b1b1f; color:#eee; border:1px solid #444; border-radius:6px; padding:6px;"></select>
+                    <button class="btn" id="camera-refresh" title="Refrescar lista" style="width:auto; padding:0 12px;">&#8635;</button>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <input id="camera-custom" type="text" placeholder="manual: índice / URL / RTSP" style="flex:1; background:#1b1b1f; color:#eee; border:1px solid #444; border-radius:6px; padding:6px;">
+                    <button class="btn" id="camera-apply" style="width:auto; padding:0 12px;">Set</button>
+                </div>
+            </div>
         </div>
 
         <!-- Events -->
@@ -687,6 +698,43 @@ body {
         setTimeout(() => { toast.className = 'toast'; }, 3000);
     }
 
+    function loadCameras() {
+        fetch('/api/cameras').then(r => r.json()).then(d => {
+            const sel = $('camera-select');
+            sel.innerHTML = '';
+            const cams = d.cameras || [];
+            cams.forEach(c => {
+                const o = document.createElement('option');
+                o.value = c.source;
+                o.textContent = c.label;
+                if (String(c.source) === String(d.active)) o.selected = true;
+                sel.appendChild(o);
+            });
+            if (!cams.length) {
+                const o = document.createElement('option');
+                o.value = ''; o.textContent = 'Sin cámaras detectadas';
+                sel.appendChild(o);
+            }
+        }).catch(() => {});
+    }
+
+    function setCamera(source) {
+        if (!source) return;
+        fetch('/api/camera', {
+            method: 'POST',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({source: source}),
+        }).then(r => r.json()).then(d => {
+            if (d.status === 'ok') showToast('Cámara: ' + source);
+            setTimeout(loadCameras, 1500);
+        }).catch(() => {});
+    }
+
+    $('camera-select').addEventListener('change', e => setCamera(e.target.value));
+    $('camera-refresh').addEventListener('click', loadCameras);
+    $('camera-apply').addEventListener('click', () => setCamera($('camera-custom').value.trim()));
+    loadCameras();
+
     function connectSSE() {
         const es = new EventSource('/telemetry_feed');
         es.onopen = () => setConnected(true);
@@ -730,22 +778,21 @@ _camera_fps: float = 0.0
 _running: bool = True
 _pipeline = None
 _cloud = None
+# Camera source the capture thread should use; the dashboard can change it at
+# runtime (e.g. to pick OBS Virtual Camera). _active_source is what is actually open.
+_desired_source: str = "0"
+_active_source: str | None = None
 
 
-# Camera capture thread, runs at native resolution.
-def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
-    """Continuously read frames from the camera and store the latest one."""
-    global _latest_frame, _latest_jpeg, _camera_fps, _running
-
+def _open_capture(source, res_w: int, res_h: int):
+    """Open a VideoCapture for an int index or a path/URL string."""
     if isinstance(source, str) and source.isdigit():
         source = int(source)
-
     cap = (
         cv2.VideoCapture(source, cv2.CAP_DSHOW)
         if isinstance(source, int) and sys.platform == "win32"
         else cv2.VideoCapture(source)
     )
-
     if isinstance(source, int):
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
@@ -753,19 +800,64 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
         cap.set(cv2.CAP_PROP_FPS, 30)
         # Prevent buffer buildup (slow motion lag)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return cap
 
-    if not cap.isOpened():
-        logger.error("Cannot open camera source: %s", source)
-        _running = False
-        return
 
-    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    logger.info("Camera opened: %dx%d", actual_w, actual_h)
+def _probe_cameras(max_index: int = 8):
+    """Probe camera indices and return the ones that open.
 
+    Skips the currently active index (reopening it would steal the live capture)
+    but still reports it as available. Used by the dashboard's source picker so a
+    phone-via-OBS Virtual Camera can be selected once OBS is running.
+    """
+    found = []
+    for i in range(max_index):
+        if _active_source is not None and str(_active_source) == str(i):
+            found.append({"source": str(i), "label": f"Camera {i} (active)"})
+            continue
+        cap = (
+            cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            if sys.platform == "win32" else cv2.VideoCapture(i)
+        )
+        ok = cap.isOpened()
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) if ok else 0
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) if ok else 0
+        cap.release()
+        if ok:
+            label = f"Camera {i}" + (f"  {w}x{h}" if w else "")
+            found.append({"source": str(i), "label": label})
+    return found
+
+
+# Camera capture thread, runs at native resolution. Reopens the device whenever
+# the selected source (_desired_source) changes, so the dashboard can switch cams.
+def _camera_thread(res_w: int, res_h: int, selfie: bool):
+    """Continuously read frames from the selected camera and store the latest one."""
+    global _latest_frame, _latest_jpeg, _camera_fps, _active_source
+
+    cap = None
+    current = None
     fps_times = []
     try:
         while _running:
+            if current != _desired_source:
+                if cap is not None:
+                    cap.release()
+                current = _desired_source
+                cap = _open_capture(current, res_w, res_h)
+                if not cap.isOpened():
+                    logger.error("Cannot open camera source: %s", current)
+                    cap.release()
+                    cap = None
+                    _active_source = None
+                    time.sleep(1.0)  # keep running so the user can pick another
+                    continue
+                aw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                ah = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                logger.info("Camera opened: source=%s  %dx%d", current, aw, ah)
+                _active_source = current
+                fps_times = []
+
             ret, frame = cap.read()
             if not ret:
                 time.sleep(0.01)
@@ -789,7 +881,8 @@ def _camera_thread(source, selfie: bool, res_w: int, res_h: int):
                 _latest_jpeg = buf.tobytes()
                 _frame_cond.notify_all()
     finally:
-        cap.release()
+        if cap is not None:
+            cap.release()
         logger.info("Camera thread stopped.")
 
 
@@ -1109,6 +1202,24 @@ def api_reset():
         _pipeline.reset()
     return {"status": "ok"}
 
+@app.route("/api/cameras")
+def api_cameras():
+    return {"cameras": _probe_cameras(),
+            "active": None if _active_source is None else str(_active_source)}
+
+
+@app.route("/api/camera", methods=["POST"])
+def api_camera():
+    global _desired_source
+    body = request.get_json(silent=True) or {}
+    source = str(body.get("source", "")).strip()
+    if not source:
+        return {"status": "error", "error": "missing source"}, 400
+    _desired_source = source
+    logger.info("Camera source switch requested: %s", source)
+    return {"status": "ok", "source": source}
+
+
 @app.route("/api/calibrate", methods=["POST"])
 def api_calibrate():
     if _pipeline:
@@ -1145,7 +1256,7 @@ def telemetry_feed():
 
 
 def main():
-    global _running
+    global _running, _desired_source
 
     parser = argparse.ArgumentParser(description="DMS Web Dashboard")
     parser.add_argument("--config", default="config/config.yaml")
@@ -1258,9 +1369,10 @@ def main():
     logger.info("  Dashboard:     http://%s:%d", args.host, args.port)
     logger.info("=" * 60)
 
+    _desired_source = args.source
     t_cam = threading.Thread(
         target=_camera_thread,
-        args=(args.source, selfie, args.res_w, args.res_h),
+        args=(args.res_w, args.res_h, selfie),
         daemon=True,
     )
     t_cam.start()
